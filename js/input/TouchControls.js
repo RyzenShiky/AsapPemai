@@ -1,7 +1,6 @@
 /**
- * Multi-touch: joystick + look + action buttons can run simultaneously.
- * Each finger is tracked by touch.identifier so one finger on joy
- * does not steal look, and buttons don't block either zone.
+ * Multi-touch: joystick (left) + look (right) + action buttons.
+ * Look applies immediately with higher sensitivity for responsive camera.
  */
 export class TouchControls {
   constructor(rootEl, keys, onLook) {
@@ -9,12 +8,16 @@ export class TouchControls {
     this.onLook = onLook;
     this.active = false;
     this.onFlashToggle = null;
+    this.onHide = null;
+    this.onThrowBtn = null;
 
     this._joyId = null;
     this._lookId = null;
     this._joyOrigin = { x: 0, y: 0 };
     this._lookLast = { x: 0, y: 0 };
     this._maxRadius = 48;
+    // Higher = snappier look (was feeling heavy at ~0.003)
+    this.lookScale = 1.65;
 
     this.el = document.createElement('div');
     this.el.id = 'touch-controls';
@@ -44,14 +47,11 @@ export class TouchControls {
     this.btnHide = this.el.querySelector('#touch-hide');
     this.btnThrow = this.el.querySelector('#touch-throw');
     this.btnRevive = this.el.querySelector('#touch-revive');
-    this.onHide = null;
-    this.onThrowBtn = null;
 
     this._onStart = this._onStart.bind(this);
     this._onMove = this._onMove.bind(this);
     this._onEnd = this._onEnd.bind(this);
 
-    // Capture on whole control layer so multi-touch is consistent
     this.el.addEventListener('touchstart', this._onStart, { passive: false });
     this.el.addEventListener('touchmove', this._onMove, { passive: false });
     this.el.addEventListener('touchend', this._onEnd, { passive: false });
@@ -72,7 +72,6 @@ export class TouchControls {
     this._releaseAll();
   }
 
-  /** Recalc joystick radius after rotate/resize */
   _syncLayout() {
     const r = this.base.getBoundingClientRect();
     this._maxRadius = Math.max(36, Math.min(r.width, r.height) * 0.42);
@@ -102,13 +101,8 @@ export class TouchControls {
       btn.addEventListener('touchcancel', end, { passive: false });
     };
 
-    press(
-      this.btnRun,
-      () => setKey('ShiftLeft', true),
-      () => setKey('ShiftLeft', false)
-    );
+    press(this.btnRun, () => setKey('ShiftLeft', true), () => setKey('ShiftLeft', false));
 
-    // Crouch = toggle
     this.btnCrouch.addEventListener(
       'touchstart',
       (e) => {
@@ -125,19 +119,34 @@ export class TouchControls {
       { passive: false }
     );
 
-    this.btnHide.addEventListener('touchstart', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      if (this.onHide) this.onHide();
-    }, { passive: false });
-    this.btnThrow.addEventListener('touchstart', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      if (this.onThrowBtn) this.onThrowBtn();
-    }, { passive: false });
-    this.btnRevive.addEventListener('touchstart', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      this.keys.add('KeyE');
-      this.btnRevive.classList.add('active');
-    }, { passive: false });
+    this.btnHide.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.onHide) this.onHide();
+      },
+      { passive: false }
+    );
+    this.btnThrow.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.onThrowBtn) this.onThrowBtn();
+      },
+      { passive: false }
+    );
+    this.btnRevive.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.keys.add('KeyE');
+        this.btnRevive.classList.add('active');
+      },
+      { passive: false }
+    );
     this.btnRevive.addEventListener('touchend', () => {
       this.keys.delete('KeyE');
       this.btnRevive.classList.remove('active');
@@ -147,48 +156,33 @@ export class TouchControls {
       (e) => {
         e.preventDefault();
         e.stopPropagation();
-        this.btnFlash.classList.toggle('active');
-        if (typeof this.onFlashToggle === 'function') this.onFlashToggle();
+        if (this.onFlashToggle) this.onFlashToggle();
       },
       { passive: false }
     );
   }
 
-  _targetZone(x, y) {
-    // Buttons first (small hit area)
-    for (const btn of [this.btnRun, this.btnCrouch, this.btnFlash]) {
-      const r = btn.getBoundingClientRect();
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return 'btn';
-    }
-    const jr = this.joyZone.getBoundingClientRect();
-    if (x >= jr.left && x <= jr.right && y >= jr.top && y <= jr.bottom) return 'joy';
-    const lr = this.lookZone.getBoundingClientRect();
-    if (x >= lr.left && x <= lr.right && y >= lr.top && y <= lr.bottom) return 'look';
-    // Fallback: left half joy, right half look
-    return x < window.innerWidth * 0.42 ? 'joy' : 'look';
+  _touchIn(el, t) {
+    const r = el.getBoundingClientRect();
+    return t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom;
   }
 
   _onStart(e) {
-    if (!this.active) return;
-    e.preventDefault();
     for (const t of e.changedTouches) {
-      const zone = this._targetZone(t.clientX, t.clientY);
-      if (zone === 'btn') continue; // handled by button listeners
-
-      if (zone === 'joy' && this._joyId == null) {
+      if (this._touchIn(this.btnRun, t) || this._touchIn(this.btnCrouch, t) ||
+          this._touchIn(this.btnFlash, t) || this._touchIn(this.btnHide, t) ||
+          this._touchIn(this.btnThrow, t) || this._touchIn(this.btnRevive, t)) {
+        continue;
+      }
+      if (this._joyId == null && this._touchIn(this.joyZone, t)) {
+        e.preventDefault();
         this._joyId = t.identifier;
-        const r = this.base.getBoundingClientRect();
-        this._joyOrigin.x = r.left + r.width / 2;
-        this._joyOrigin.y = r.top + r.height / 2;
-        this._syncLayout();
+        const br = this.base.getBoundingClientRect();
+        this._joyOrigin.x = br.left + br.width / 2;
+        this._joyOrigin.y = br.top + br.height / 2;
         this._updateJoy(t.clientX, t.clientY);
-      } else if (zone === 'look' && this._lookId == null) {
-        this._lookId = t.identifier;
-        this._lookLast.x = t.clientX;
-        this._lookLast.y = t.clientY;
-      } else if (zone === 'joy' && this._joyId == null) {
-        this._joyId = t.identifier;
-      } else if (this._lookId == null && zone !== 'joy') {
+      } else if (this._lookId == null) {
+        e.preventDefault();
         this._lookId = t.identifier;
         this._lookLast.x = t.clientX;
         this._lookLast.y = t.clientY;
@@ -197,19 +191,21 @@ export class TouchControls {
   }
 
   _onMove(e) {
-    if (!this.active) return;
-    e.preventDefault();
+    let needPrevent = false;
     for (const t of e.changedTouches) {
       if (t.identifier === this._joyId) {
+        needPrevent = true;
         this._updateJoy(t.clientX, t.clientY);
       } else if (t.identifier === this._lookId) {
-        const dx = t.clientX - this._lookLast.x;
-        const dy = t.clientY - this._lookLast.y;
+        needPrevent = true;
+        const dx = (t.clientX - this._lookLast.x) * this.lookScale;
+        const dy = (t.clientY - this._lookLast.y) * this.lookScale;
         this._lookLast.x = t.clientX;
         this._lookLast.y = t.clientY;
-        if (this.onLook) this.onLook(dx, dy);
+        if (this.onLook && (dx || dy)) this.onLook(dx, dy);
       }
     }
+    if (needPrevent) e.preventDefault();
   }
 
   _onEnd(e) {
@@ -237,7 +233,7 @@ export class TouchControls {
     this.knob.style.transform = `translate(${dx}px, ${dy}px)`;
     const nx = dx / max;
     const ny = dy / max;
-    const dead = 0.22;
+    const dead = 0.18;
 
     this._clearMoveKeys();
     if (ny < -dead) this.keys.add('KeyW');

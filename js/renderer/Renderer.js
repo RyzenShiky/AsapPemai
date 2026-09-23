@@ -33,14 +33,23 @@ export class Renderer {
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: !gfx.touch,
+      antialias: !!gfx.antialias,
       powerPreference: 'high-performance',
+      alpha: false,
+      stencil: false,
+      depth: true,
     });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, gfx.pixelRatioCap));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, gfx.pixelRatioCap));
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     this.renderer.setClearColor(0x07080a);
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    // ACES is expensive on mobile GPUs
+    if (gfx.touch) {
+      this.renderer.toneMapping = THREE.NoToneMapping;
+      this.renderer.toneMappingExposure = 1;
+    } else {
+      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      this.renderer.toneMappingExposure = 1.15;
+    }
     this.renderer.shadowMap.enabled = gfx.shadows;
     if (gfx.shadows) this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -51,8 +60,8 @@ export class Renderer {
     this.camera = new THREE.PerspectiveCamera(
       72,
       canvas.clientWidth / canvas.clientHeight,
-      0.15,
-      320
+      0.2,
+      gfx.drawDistance || 320
     );
 
     // Flashlight: strong spot + near fill (dark forest needs high intensity)
@@ -65,7 +74,7 @@ export class Renderer {
     this.flashlightFill = new THREE.PointLight(0xffe8c8, 0, 8, 2);
     this.scene.add(this.flashlightFill);
 
-    const groundGeo = new THREE.PlaneGeometry(WORLD.size, WORLD.size, 48, 48);
+    const groundGeo = new THREE.PlaneGeometry(WORLD.size, WORLD.size, gfx.touch ? 24 : 48, gfx.touch ? 24 : 48);
     const pos = groundGeo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -102,17 +111,13 @@ export class Renderer {
     // Load GLB models
     const loader = new GLTFLoader();
     try {
-      // Silhouette entity (pointed head + glowing eyes) — primary horror look
+      // Silhouette entity (no skeleton) — do NOT attach GLB bone animations
       this.monsterTemplate = this._fallbackMonster();
       this.monsterAnimations = [];
-      // Optional: still load glb anims if present (ignored if no skeleton match)
-      try {
-        const monGltf = await loader.loadAsync('./assets/monster.glb');
-        this.monsterAnimations = monGltf.animations || [];
-      } catch (_) {}
     } catch (e) {
       console.warn('monster setup', e);
       this.monsterTemplate = this._fallbackMonster();
+      this.monsterAnimations = [];
     }
     try {
       const plGltf = await loader.loadAsync('./assets/player.glb');
@@ -150,7 +155,12 @@ export class Renderer {
         if (c.isMesh && c.material) c.material = c.material.clone();
       });
       this.scene.add(m);
-      m.userData.anim = this._setupAnimated(m, this.monsterAnimations, 'Patrol');
+      // Only bind AnimationMixer when clips exist AND mesh has matching bones
+      if (this.monsterAnimations && this.monsterAnimations.length) {
+        m.userData.anim = this._setupAnimated(m, this.monsterAnimations, 'Patrol');
+      } else {
+        m.userData.anim = null;
+      }
       this.monsterMeshes.push(m);
       this._attachNameTag(m, '', 'monster-' + i);
     }
@@ -342,7 +352,7 @@ export class Renderer {
     this._rainOn = on;
     if (on && !this.rainMesh) {
       // Fewer drops on weak devices; streaks via sizeAttenuation
-      const n = this.gfx.touch ? 120 : 280;
+      const n = (this.gfx && this.gfx.maxRain) || (this.gfx.touch ? 100 : 280);
       const positions = new Float32Array(n * 3);
       const speeds = new Float32Array(n);
       for (let i = 0; i < n; i++) {
@@ -451,11 +461,39 @@ export class Renderer {
 
   _setupAnimated(mesh, clips, defaultClip) {
     if (!clips || !clips.length) return null;
+    // Collect bone / node names from hierarchy + skeletons
+    const names = new Set();
+    mesh.traverse((c) => {
+      if (c.name) names.add(c.name);
+      if (c.isSkinnedMesh && c.skeleton) {
+        for (const b of c.skeleton.bones) if (b.name) names.add(b.name);
+      }
+    });
+    // No bones at all (silhouette) → skip animation entirely
+    if (names.size === 0) return null;
+
     const mixer = new THREE.AnimationMixer(mesh);
     const actions = {};
     for (const clip of clips) {
-      if (clip && clip.name) actions[clip.name] = mixer.clipAction(clip);
+      if (!clip || !clip.name) continue;
+      let hit = 0;
+      let total = 0;
+      for (const track of clip.tracks || []) {
+        const nodeName = (track.name || '').split('.')[0];
+        if (!nodeName) continue;
+        total++;
+        if (names.has(nodeName)) hit++;
+      }
+      // Require majority of tracks to match — otherwise skip (prevents PropertyBinding spam)
+      if (total > 0 && hit / total < 0.5) continue;
+      if (total > 0 && hit === 0) continue;
+      try {
+        actions[clip.name] = mixer.clipAction(clip);
+      } catch (e) {
+        /* skip bad clip */
+      }
     }
+    if (!Object.keys(actions).length) return null;
     this.mixers.push(mixer);
     const entry = { mixer, actions, current: null };
     if (defaultClip && actions[defaultClip]) {
@@ -628,7 +666,7 @@ export class Renderer {
           trunks.push({ x, z, scale });
           crowns.push({ x, z, scale });
         }
-        const rockCount = 1 + Math.floor(tileSeed(tx, tz, 99) * 2);
+        const rockCount = Math.max(0, Math.floor((1 + Math.floor(tileSeed(tx, tz, 99) * 2)) * ((this.gfx && this.gfx.foliageScale) || 1)));
         for (let i = 0; i < rockCount; i++) {
           const sx = tileSeed(tx, tz, 200 + i * 2);
           const sz = tileSeed(tx, tz, 201 + i * 2);

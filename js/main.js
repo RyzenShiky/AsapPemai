@@ -2,7 +2,7 @@ import { GameState } from './core/GameState.js';
 import { Clock } from './core/Clock.js';
 import { buildColliders, buildSpatialGrid } from './core/Collision.js';
 import { isTouchDevice } from './core/Device.js';
-import { onOrientationChange, updateRotateHint, tryLandscapeLock, installLandscapeAutoLock } from './core/Orientation.js';
+import { onOrientationChange, updateRotateHint, tryLandscapeLock, installLandscapeAutoLock, cycleScreenRotation, autoSyncFromDevice } from './core/Orientation.js';
 import { loadProfile, saveProfile, ensureUid } from './core/Profile.js';
 import { PlayerController } from './gameplay/Player.js';
 import { MonsterController } from './gameplay/Monster.js';
@@ -149,6 +149,15 @@ async function init() {
     await tryLandscapeLock();
     updateRotateHint();
   });
+  const rotHandler = () => {
+    window.__longwayManualRot = true;
+    cycleScreenRotation();
+    updateRotateHint();
+    const canvas = document.getElementById('game-canvas');
+    if (renderer && canvas) renderer.resize(canvas.clientWidth, canvas.clientHeight);
+  };
+  document.getElementById('btn-rotate-screen')?.addEventListener('click', rotHandler);
+  document.getElementById('btn-settings-rotate')?.addEventListener('click', rotHandler);
 
   // If already guest profile saved, skip login optional — still show login first
 }
@@ -697,7 +706,7 @@ function startLoop() {
   tryLandscapeLock();
   function frame() {
     if (!running) return;
-    const dt = clock.tick();
+    const dt = Math.min(0.05, clock.tick()); // clamp: avoid spiral on lag spikes
     const now = performance.now() / 1000;
     const isAuthority = mode === 'solo' || (room && room.isHost);
 

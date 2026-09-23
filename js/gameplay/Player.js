@@ -15,7 +15,9 @@ export class PlayerController {
     this.keys = new Set();
     this.pointerLocked = false;
     this.sensitivity = 0.0022;
-    this.touchSensitivity = 0.0045;
+    this.touchSensitivity = 0.0052;
+    this._lookDX = 0;
+    this._lookDY = 0;
     this._footAcc = 0;
     this.flashlightOn = false;
 
@@ -88,15 +90,26 @@ export class PlayerController {
   }
 
   applyLook(dx, dy, sens = this.touchSensitivity) {
+    // Accumulate — applied once per frame in update() for smooth, lighter feel
+    this._lookDX = (this._lookDX || 0) + dx * sens;
+    this._lookDY = (this._lookDY || 0) + dy * sens;
+  }
+
+  _flushLook() {
     const p = this.state.data.player;
-    p.rotation.yaw -= dx * sens;
-    p.rotation.pitch -= dy * sens;
-    p.rotation.pitch = Math.max(-1.4, Math.min(1.4, p.rotation.pitch));
+    if (!this._lookDX && !this._lookDY) return;
+    // Apply full accumulated delta — no lag smoothing (felt "berat")
+    p.rotation.yaw -= this._lookDX;
+    p.rotation.pitch -= this._lookDY;
+    p.rotation.pitch = Math.max(-1.35, Math.min(1.35, p.rotation.pitch));
+    this._lookDX = 0;
+    this._lookDY = 0;
   }
 
   update(dt) {
     const p = this.state.data.player;
     if (!p.alive) return;
+    this._flushLook();
     p.flashlight = this.flashlightOn;
 
     // Riding vehicle — camera look stays free; WASD only if driver
