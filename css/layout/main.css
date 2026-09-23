@@ -1,0 +1,9 @@
+#app { position: relative; width: 100vw; height: 100vh; }
+#ui-root { position: absolute; inset: 0; pointer-events: none; }
+#ui-root .screen, #ui-root button, #ui-root input, #ui-root select { pointer-events: auto; }
+.screen {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, #1a1210 0%, #050405 70%);
+  gap: 1rem;
+}

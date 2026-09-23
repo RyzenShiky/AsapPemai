@@ -1,0 +1,36 @@
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#050405;font-family:system-ui,sans-serif;color:#e8e0d5}
+canvas{display:block;width:100%;height:100%;outline:none}
+.hidden{display:none!important}
+#app{position:relative;width:100vw;height:100vh}
+#ui-root{position:absolute;inset:0;pointer-events:none}
+#ui-root .screen,#ui-root button,#ui-root input,#ui-root select{pointer-events:auto}
+.screen{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at center,#1a1210 0%,#050405 70%);
+  gap:1rem;
+}
+.screen h1{font-family:Georgia,serif;font-size:3.5rem;letter-spacing:.3em;color:#8b0000;text-shadow:0 0 20px rgba(139,0,0,.5)}
+.subtitle{color:#6b6560;font-style:italic;margin-bottom:1.5rem}
+.btn{
+  min-width:200px;padding:.75rem 1.5rem;background:transparent;
+  border:1px solid #6b6560;color:#e8e0d5;cursor:pointer;font:inherit;
+  transition:border-color .2s,background .2s;
+}
+.btn:hover,.btn.primary{border-color:#8b0000;background:rgba(139,0,0,.15)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+#hud{position:absolute;inset:0;pointer-events:none}
+#stamina-bar{position:absolute;bottom:2rem;left:50%;transform:translateX(-50%);width:200px;height:6px;background:rgba(0,0,0,.6);border:1px solid #444}
+#stamina-fill{height:100%;width:100%;background:#4a7c59;transition:width .1s}
+#crosshair{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,.4);font-size:24px;user-select:none}
+#suspicion-indicator{position:absolute;top:1rem;right:1rem;width:12px;height:12px;border-radius:50%}
+#suspicion-indicator.low{background:#4a7c59}
+#suspicion-indicator.mid{background:#c9a227;box-shadow:0 0 8px #c9a227}
+#suspicion-indicator.high{background:#8b0000;box-shadow:0 0 12px #8b0000;animation:pulse .8s infinite}
+@keyframes pulse{50%{opacity:.5}}
+#settings-screen label{display:flex;flex-direction:column;gap:.25rem;width:280px}
+#loading-bar{width:280px;height:4px;background:#222}
+#loading-fill{height:100%;width:0;background:#8b0000;transition:width .2s}
+#wasm-status{position:absolute;bottom:.5rem;left:.5rem;font-size:11px;color:#555;pointer-events:none}
+#wasm-status.ok{color:#4a7c59}
+#wasm-status.fallback{color:#c9a227}

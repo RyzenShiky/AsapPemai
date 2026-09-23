@@ -1,0 +1,59 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$roomCode": {
+        ".read": true,
+        "meta": {
+          ".write": true,
+          ".validate": "newData.hasChildren(['hostUid', 'createdAt']) || newData.hasChild('hostUid') || newData.hasChild('started')"
+        },
+        "players": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.hasChildren(['x', 'y', 'z', 'yaw', 'alive', 'health']) && newData.child('x').isNumber() && newData.child('z').isNumber() && newData.child('health').isNumber() && newData.child('health').val() >= 0 && newData.child('health').val() <= 100"
+          }
+        },
+        "monster": {
+          ".write": "auth != null",
+          "$mid": {
+            ".validate": "newData.hasChildren(['x', 'y', 'z', 'yaw', 'aiState'])"
+          }
+        },
+        "soundEvents": {
+          ".write": "auth != null",
+          "$sid": {
+            ".validate": "newData.hasChildren(['x', 'z', 'intensity', 'radius', 'type', 't'])"
+          }
+        },
+        "vehicles": {
+          ".write": "auth != null",
+          "$vid": {
+            ".validate": "newData.hasChildren(['type', 'x', 'z', 'yaw'])"
+          }
+        },
+        "billboard": {
+          ".write": "auth != null",
+          ".validate": "newData.hasChildren(['url', 'type', 'by', 't'])"
+        },
+        "game": {
+          ".write": "auth != null",
+          ".validate": "newData.hasChildren(['gameOver', 'win'])"
+        }
+      }
+    },
+    "saves": {
+      "$deviceId": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "leaderboard": {
+      ".read": true,
+      "$entryId": {
+        ".write": "!data.exists()"
+      }
+    }
+  }
+}

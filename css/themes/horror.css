@@ -1,0 +1,143 @@
+body.horror-theme {
+  --color-bg: #050405;
+  --color-accent: #8b0000;
+  --color-text: #e8e0d5;
+  --sanity-hue: 0deg;
+  --sanity-blur: 0px;
+  --sanity-desat: 0;
+}
+
+/* ---------- Ambient grain + vignette (always on, very subtle) ---------- */
+#grain-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.6) 0px, transparent 1px, transparent 2px),
+    repeating-linear-gradient(90deg, rgba(0,0,0,0.4) 0px, transparent 1px, transparent 2px);
+  background-size: 3px 3px;
+  animation: grainShift 0.4s steps(4) infinite;
+}
+@keyframes grainShift {
+  0%   { transform: translate(0, 0); }
+  25%  { transform: translate(-1%, 1%); }
+  50%  { transform: translate(1%, -1%); }
+  75%  { transform: translate(-1%, -1%); }
+  100% { transform: translate(0, 0); }
+}
+
+#vignette-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+}
+
+/* ---------- Sanity-driven color grading on the whole app shell ---------- */
+#app {
+  filter:
+    hue-rotate(var(--sanity-hue))
+    blur(var(--sanity-blur))
+    saturate(calc(1 - var(--sanity-desat)));
+  transition: filter 0.6s ease;
+}
+#app.sanity-shaken   { --sanity-hue: -4deg; --sanity-desat: 0.1; }
+#app.sanity-low      { --sanity-hue: -8deg; --sanity-blur: 0.4px; --sanity-desat: 0.25; }
+#app.sanity-critical { --sanity-hue: -14deg; --sanity-blur: 1px; --sanity-desat: 0.45; }
+#app.sanity-critical::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(80,0,20,0.35) 100%);
+  animation: sanityThrob 2.4s ease-in-out infinite;
+}
+@keyframes sanityThrob { 50% { opacity: 0.5; } }
+
+/* ---------- Screen shake (jumpscares / heavy impacts) ---------- */
+#app.screen-shake { animation: screenShake 0.42s cubic-bezier(.36,.07,.19,.97); }
+@keyframes screenShake {
+  0%, 100% { transform: translate(0, 0); }
+  15% { transform: translate(-6px, 3px) rotate(-0.4deg); }
+  30% { transform: translate(5px, -4px) rotate(0.4deg); }
+  45% { transform: translate(-4px, 4px); }
+  60% { transform: translate(4px, 2px); }
+  75% { transform: translate(-2px, -2px); }
+}
+
+/* ---------- Jumpscare full-screen flash ---------- */
+#jumpscare-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, rgba(60,0,0,0.85) 0%, #000 100%);
+}
+#jumpscare-overlay.visible {
+  opacity: 1;
+  animation: jumpscareFlash 0.42s ease-out;
+}
+#jumpscare-overlay.hallucination.visible {
+  background: radial-gradient(ellipse at center, rgba(40,0,60,0.85) 0%, #000 100%);
+}
+@keyframes jumpscareFlash {
+  0%   { opacity: 0; filter: brightness(1); }
+  8%   { opacity: 1; filter: brightness(2.5); }
+  20%  { opacity: 0.9; filter: brightness(1); }
+  100% { opacity: 0; }
+}
+
+/* ---------- Flickering glitch title on menu screens ---------- */
+.flicker-title {
+  position: relative;
+  animation: titleFlicker 6s ease-in-out infinite;
+}
+.flicker-title::before,
+.flicker-title::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+.flicker-title::before { color: #4dd0ff; }
+.flicker-title::after { color: #ff3355; }
+.flicker-title:hover::before,
+.flicker-title:hover::after {
+  animation: titleGlitch 0.5s steps(2, end) infinite;
+}
+@keyframes titleFlicker {
+  0%, 92%, 100% { opacity: 1; }
+  93% { opacity: 0.2; }
+  94% { opacity: 1; }
+  95% { opacity: 0.3; }
+  96% { opacity: 1; }
+}
+@keyframes titleGlitch {
+  0%   { opacity: 0.7; transform: translate(2px, 0); }
+  50%  { opacity: 0.5; transform: translate(-2px, 1px); }
+  100% { opacity: 0.7; transform: translate(1px, -1px); }
+}
+
+/* ---------- Drifting fog on menu screens ---------- */
+.fog-layer {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.35;
+  background:
+    radial-gradient(ellipse 60% 40% at 20% 30%, rgba(180,180,190,0.10), transparent 60%),
+    radial-gradient(ellipse 50% 35% at 80% 70%, rgba(160,160,180,0.08), transparent 60%);
+  animation: fogDrift 22s ease-in-out infinite alternate;
+}
+@keyframes fogDrift {
+  0%   { transform: translate(-2%, 0) scale(1); }
+  100% { transform: translate(2%, -1%) scale(1.05); }
+}
+.screen > *:not(.fog-layer) { position: relative; z-index: 1; }

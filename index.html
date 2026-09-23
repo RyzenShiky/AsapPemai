@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <link rel="icon" href="data:,">
+  <title>LONGWAY — Horror 3D</title>
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="screen-orientation" content="landscape" />
+  <link rel="stylesheet" href="./css/base/reset.css" />
+  <link rel="stylesheet" href="./css/base/variables.css" />
+  <link rel="stylesheet" href="./css/layout/main.css" />
+  <link rel="stylesheet" href="./css/components/hud.css" />
+  <link rel="stylesheet" href="./css/components/touch.css" />
+  <link rel="stylesheet" href="./css/screens/menu.css" />
+  <link rel="stylesheet" href="./css/themes/horror.css" />
+  <link rel="stylesheet" href="./css/components/mobile.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body class="horror-theme">
+  <div id="rotate-hint" aria-live="polite">
+    <div class="icon">📱</div>
+    <p><strong>Putar ke landscape</strong></p>
+    <p class="subtitle" style="max-width:16rem">Game otomatis meminta mode mendatar. Putar HP/tablet, lalu ketuk layar.</p>
+    <button type="button" id="btn-force-landscape" class="btn primary" style="pointer-events:auto;margin-top:0.75rem">Aktifkan Landscape</button>
+  </div>
+  <div id="app">
+    <canvas id="game-canvas" tabindex="0"></canvas>
+    <div id="ui-root">
+      <!-- LOGIN / PROFILE -->
+      <div id="login-screen" class="screen">
+        <div class="fog-layer" aria-hidden="true"></div>
+        <h1 class="flicker-title" data-text="LONGWAY">LONGWAY</h1>
+        <p class="subtitle">Sign in to continue</p>
+        <label>Display name
+          <input type="text" id="profile-name" maxlength="16" placeholder="Your name" />
+        </label>
+        <p class="subtitle" style="margin:0.5rem 0 0">Avatar color</p>
+        <div class="color-row" id="color-row">
+          <div class="color-swatch selected" data-color="#446688" style="background:#446688"></div>
+          <div class="color-swatch" data-color="#8b4513" style="background:#8b4513"></div>
+          <div class="color-swatch" data-color="#2e8b57" style="background:#2e8b57"></div>
+          <div class="color-swatch" data-color="#6a5acd" style="background:#6a5acd"></div>
+          <div class="color-swatch" data-color="#b22222" style="background:#b22222"></div>
+        </div>
+        <button id="btn-guest" class="btn primary" disabled>Play as Guest</button>
+        <button id="btn-google" class="btn" disabled>Continue with Google</button>
+        <p id="login-status" class="subtitle">Memuat aset…</p>
+        <p id="login-error" class="subtitle" style="color:#c44"></p>
+      </div>
+
+      <div id="menu-screen" class="screen hidden">
+        <div class="fog-layer" aria-hidden="true"></div>
+        <h1 class="flicker-title" data-text="LONGWAY">LONGWAY</h1>
+        <p class="subtitle">Don't make a sound.</p>
+        <p id="menu-player-name" class="subtitle"></p>
+        <button id="btn-start" class="btn primary">Start Game</button>
+        <button id="btn-continue" class="btn" disabled>Continue</button>
+        <button id="btn-multi" class="btn">Multiplayer</button>
+        <button id="btn-profile" class="btn">Profile</button>
+        <button id="btn-settings" class="btn">Settings</button>
+      </div>
+
+      <div id="multi-screen" class="screen hidden">
+        <h2>Multiplayer</h2>
+        <p class="subtitle">Host runs monster AI. Others listen &amp; render.</p>
+        <button id="btn-host" class="btn primary">Host Room</button>
+        <label>Join code
+          <input id="join-code" type="text" maxlength="8" placeholder="ABC123"
+            style="text-transform:uppercase;padding:0.5rem;width:min(80vw,200px);background:#111;border:1px solid #444;color:#eee" />
+        </label>
+        <button id="btn-join" class="btn">Join Room</button>
+        <button id="btn-multi-back" class="btn">Back</button>
+      </div>
+
+      <div id="lobby-screen" class="screen hidden">
+        <h2>Lobby</h2>
+        <p class="subtitle">Room code</p>
+        <p id="lobby-code" style="font-size:2.5rem;letter-spacing:0.35em;color:var(--color-accent);font-family:var(--font-title)">------</p>
+        <button id="btn-copy-code" class="btn" type="button">Copy code</button>
+        <p class="subtitle" style="margin-top:1rem">Players</p>
+        <ul id="lobby-players" style="list-style:none;text-align:left;min-width:240px;max-height:200px;overflow:auto"></ul>
+        <p id="lobby-status" class="subtitle">Waiting for host to start…</p>
+        <button id="btn-start-multi" class="btn primary hidden">Start Game</button>
+        <button id="btn-lobby-leave" class="btn">Leave</button>
+      </div>
+
+      <div id="grain-overlay" aria-hidden="true"></div>
+      <div id="vignette-overlay" aria-hidden="true"></div>
+      <div id="danger-overlay" aria-hidden="true"></div>
+      <div id="jumpscare-overlay" class="hidden" aria-hidden="true"></div>
+      <div id="hud" class="hidden">
+        <div id="stamina-bar"><div id="stamina-fill"></div></div>
+        <div id="health-bar"><div id="health-fill"></div></div>
+        <div id="sanity-bar" title="Sanity"><div id="sanity-fill"></div></div>
+        <p id="whisper-caption" class="hidden" aria-hidden="true">…did you hear that?</p>
+        <div id="suspicion-indicator"></div>
+        <div id="crosshair">+</div>
+        <div id="heart-rate"><span id="heart-icon">♥</span> <span id="heart-bpm">70</span> BPM</div>
+        <div id="monster-dist"></div>
+        <div id="match-timer">3:00</div>
+        <div id="phase-label">SORE</div>
+        <div id="location-hint" class="hidden"></div>
+        <div id="weather-label"></div>
+        <div id="revive-bar" class="hidden"></div>
+        <div id="status-pills">
+          <span id="pill-hide" class="pill hidden">HIDE</span>
+          <span id="pill-breath" class="pill hidden">BREATH</span>
+          <span id="pill-throw" class="pill">×2</span>
+        </div>
+        <div id="room-hud" class="hidden"></div>
+      </div>
+
+      <div id="settings-screen" class="screen hidden">
+        <h2>Settings</h2>
+        <label>Master Volume <input type="range" id="vol-master" min="0" max="1" step="0.01" value="0.8" /></label>
+        <label>SFX Volume <input type="range" id="vol-sfx" min="0" max="1" step="0.01" value="1" /></label>
+        <button id="btn-settings-back" class="btn">Back</button>
+      </div>
+
+      <div id="loading-screen" class="screen hidden">
+        <p>Loading...</p>
+        <div id="loading-bar"><div id="loading-fill"></div></div>
+      </div>
+
+      <div id="gameover-screen" class="screen hidden">
+        <h1 id="go-title">YOU DIED</h1>
+        <p id="go-sub" class="subtitle"></p>
+        <button id="btn-restart" class="btn primary">Try Again</button>
+        <button id="btn-menu" class="btn">Main Menu</button>
+      </div>
+    </div>
+  </div>
+  <div id="billboard-panel" class="bb-panel" aria-hidden="true">
+    <h3>Billboard</h3>
+    <p class="subtitle">Upload image / video / audio (host preferred)</p>
+    <input type="file" id="bb-file" accept="image/*,video/mp4,audio/mpeg,audio/mp3" />
+    <button id="bb-upload" class="btn primary" type="button">Upload</button>
+    <button id="bb-close" class="btn" type="button">Close</button>
+    <p id="bb-status" class="subtitle"></p>
+  </div>
+  <script type="module" src="./js/main.js?v=3.1"></script>
+</body>
+</html>

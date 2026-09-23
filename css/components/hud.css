@@ -1,0 +1,210 @@
+#hud { position: absolute; inset: 0; pointer-events: none; }
+#stamina-bar {
+  position: absolute; bottom: 2rem; left: 50%; transform: translateX(-50%);
+  width: 200px; height: 6px; background: rgba(0,0,0,0.6); border: 1px solid #444;
+}
+#stamina-fill { height: 100%; width: 100%; background: #4a7c59; transition: width 0.1s; }
+#crosshair {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  color: rgba(255,255,255,0.4); font-size: 24px; user-select: none;
+}
+#suspicion-indicator {
+  position: absolute; top: 1rem; right: 1rem; width: 12px; height: 12px; border-radius: 50%;
+}
+#suspicion-indicator.low { background: #4a7c59; }
+#suspicion-indicator.mid { background: #c9a227; box-shadow: 0 0 8px #c9a227; }
+#suspicion-indicator.high { background: #8b0000; box-shadow: 0 0 12px #8b0000; animation: pulse 0.8s infinite; }
+@keyframes pulse { 50% { opacity: 0.5; } }
+#health-bar {
+  position: absolute; bottom: 2.8rem; left: 50%; transform: translateX(-50%);
+  width: 200px; height: 6px; background: rgba(0,0,0,0.6); border: 1px solid #444;
+}
+#health-fill { height: 100%; width: 100%; background: #8b0000; transition: width 0.15s; }
+#room-hud {
+  position: absolute; top: 1rem; left: 1rem; font-size: 12px; color: #888;
+}
+
+/* Proximity danger — red vignette when monster is near */
+#danger-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s linear;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 35%,
+    rgba(120, 0, 0, 0.25) 70%,
+    rgba(90, 0, 0, 0.75) 100%
+  );
+  z-index: 15;
+}
+#danger-overlay.pulse {
+  animation: dangerPulse 0.55s ease-in-out infinite;
+}
+@keyframes dangerPulse {
+  0%, 100% { opacity: var(--danger-op, 0.4); }
+  50% { opacity: calc(var(--danger-op, 0.4) * 0.55); }
+}
+
+#heart-rate {
+  position: absolute;
+  bottom: 3.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 13px;
+  color: rgba(232, 224, 213, 0.75);
+  letter-spacing: 0.06em;
+  pointer-events: none;
+  opacity: 0.85;
+}
+#heart-icon {
+  display: inline-block;
+  color: #a33;
+  font-size: 16px;
+  transform-origin: center;
+}
+#heart-icon.beat {
+  animation: heartBeat 0.25s ease-out;
+}
+@keyframes heartBeat {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+#heart-bpm { min-width: 3.5rem; }
+#monster-dist {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: rgba(180, 170, 160, 0.7);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+#match-timer {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  color: #e8e0d5;
+  text-shadow: 0 0 8px rgba(0,0,0,0.8);
+  pointer-events: none;
+}
+#match-timer.urgent {
+  color: #ff4444;
+  animation: timerBlink 0.8s ease infinite;
+}
+@keyframes timerBlink {
+  50% { opacity: 0.45; }
+}
+#phase-label {
+  position: absolute;
+  top: 2.6rem;
+  right: 1rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.2em;
+  color: rgba(200, 190, 180, 0.65);
+  pointer-events: none;
+}
+@media screen and (orientation: landscape) and (max-height: 420px) {
+  #match-timer { top: 0.4rem; right: 0.5rem; font-size: 1rem; }
+  #phase-label { top: 1.6rem; right: 0.5rem; }
+}
+
+#location-hint {
+  position: absolute;
+  bottom: 5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.25rem 0.75rem;
+  background: rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.15);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: #c8c0b4;
+  pointer-events: none;
+}
+
+#weather-label {
+  position: absolute; top: 4rem; right: 1rem;
+  font-size: 0.7rem; letter-spacing: 0.15em; color: #8ab4d4;
+  pointer-events: none;
+}
+#revive-bar {
+  position: absolute; bottom: 6rem; left: 50%; transform: translateX(-50%);
+  padding: 0.35rem 0.9rem; background: rgba(0,40,0,0.55);
+  border: 1px solid #4a7c59; font-size: 13px; color: #cfe;
+  pointer-events: none;
+}
+#status-pills {
+  position: absolute; bottom: 4.5rem; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 0.4rem; pointer-events: none;
+}
+.pill {
+  font-size: 10px; letter-spacing: 0.1em; padding: 0.15rem 0.45rem;
+  background: rgba(0,0,0,0.5); border: 1px solid #555; color: #ccc;
+}
+.pill.hidden { display: none; }
+
+/* ---------- Sanity meter ---------- */
+#sanity-bar {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  width: 90px;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid #3a2a44;
+}
+#sanity-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #4b3a7a, #9b6bd1);
+  transition: width 0.3s ease;
+}
+#app.sanity-low #sanity-fill,
+#app.sanity-critical #sanity-fill {
+  animation: sanityFlicker 1.6s ease-in-out infinite;
+}
+@keyframes sanityFlicker { 50% { opacity: 0.55; } }
+
+/* ---------- Whisper caption (brief hallucinated-sound cue) ---------- */
+#whisper-caption {
+  position: absolute;
+  top: 3.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-style: italic;
+  letter-spacing: 0.08em;
+  color: rgba(180, 150, 210, 0.75);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+#whisper-caption.flash-out { opacity: 1; }
+#whisper-caption.hidden { display: none; }
+
+.bb-panel {
+  display: none;
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 100;
+  width: min(90vw, 320px);
+  padding: 1rem;
+  background: rgba(10,8,12,0.92);
+  border: 1px solid #444;
+  color: #e8e0d5;
+  pointer-events: auto;
+}
+.bb-panel.open { display: block; }
+.bb-panel input[type=file] { width: 100%; margin: 0.5rem 0; }
