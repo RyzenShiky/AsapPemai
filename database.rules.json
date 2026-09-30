@@ -4,55 +4,47 @@
     ".write": false,
     "rooms": {
       "$roomCode": {
-        ".read": true,
+        ".read": "auth != null",
         "meta": {
-          ".write": true,
-          ".validate": "newData.hasChildren(['hostUid', 'createdAt']) || newData.hasChild('hostUid') || newData.hasChild('started')"
+          ".write": "auth != null && (!data.exists() || !data.child('hostUid').exists() || data.child('hostUid').val() === auth.uid)",
+          ".validate": "newData.hasChild('createdAt')",
+          "hostUid": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+          "createdAt": { ".validate": "newData.isNumber()" },
+          "started": { ".validate": "newData.isBoolean()" },
+          "$other": { ".validate": false }
         },
         "players": {
           "$uid": {
             ".write": "auth != null && auth.uid === $uid",
-            ".validate": "newData.hasChildren(['x', 'y', 'z', 'yaw', 'alive', 'health']) && newData.child('x').isNumber() && newData.child('z').isNumber() && newData.child('health').isNumber() && newData.child('health').val() >= 0 && newData.child('health').val() <= 100"
-          }
-        },
-        "monster": {
-          ".write": "auth != null",
-          "$mid": {
-            ".validate": "newData.hasChildren(['x', 'y', 'z', 'yaw', 'aiState'])"
+            ".validate": "newData.hasChildren(['x', 'y', 'z', 'yaw', 'alive', 'health'])",
+            "x": { ".validate": "newData.isNumber() && newData.val() > -300 && newData.val() < 300" },
+            "z": { ".validate": "newData.isNumber() && newData.val() > -300 && newData.val() < 300" },
+            "health": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+            "name": { ".validate": "newData.isString() && newData.val().length <= 16" }
           }
         },
         "soundEvents": {
-          ".write": "auth != null",
-          "$sid": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
             ".validate": "newData.hasChildren(['x', 'z', 'intensity', 'radius', 'type', 't'])"
           }
         },
-        "vehicles": {
-          ".write": "auth != null",
-          "$vid": {
-            ".validate": "newData.hasChildren(['type', 'x', 'z', 'yaw'])"
-          }
+        "monster": {
+          ".write": "auth != null && root.child('rooms/' + $roomCode + '/meta/hostUid').val() === auth.uid",
+          "$mid": { ".validate": "newData.hasChildren(['x', 'y', 'z', 'yaw', 'aiState'])" }
         },
-        "billboard": {
-          ".write": "auth != null",
-          ".validate": "newData.hasChildren(['url', 'type', 'by', 't'])"
+        "vehicles": {
+          ".write": "auth != null && root.child('rooms/' + $roomCode + '/meta/hostUid').val() === auth.uid",
+          "$vid": { ".validate": "newData.hasChildren(['type', 'x', 'z', 'yaw'])" }
         },
         "game": {
-          ".write": "auth != null",
+          ".write": "auth != null && root.child('rooms/' + $roomCode + '/meta/hostUid').val() === auth.uid",
           ".validate": "newData.hasChildren(['gameOver', 'win'])"
+        },
+        "billboard": {
+          ".write": "auth != null && root.child('rooms/' + $roomCode + '/meta/hostUid').val() === auth.uid",
+          ".validate": "newData.hasChildren(['url', 'type', 'by', 't']) && newData.child('url').isString() && newData.child('url').val().beginsWith('https://firebasestorage.googleapis.com/')"
         }
-      }
-    },
-    "saves": {
-      "$deviceId": {
-        ".read": true,
-        ".write": true
-      }
-    },
-    "leaderboard": {
-      ".read": true,
-      "$entryId": {
-        ".write": "!data.exists()"
       }
     }
   }

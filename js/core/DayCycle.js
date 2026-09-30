@@ -1,18 +1,25 @@
-/** 3-minute cycle: afternoon → sunset → night */
-export const MATCH_SECONDS = 180;
+/**
+ * Day cycle: afternoon → sunset → night → (loop next day).
+ * DAY_SECONDS = length of one full day for lighting/phase.
+ * Match no longer ends by a fixed 3-minute timer — use endless or day-limit modes.
+ */
+export const DAY_SECONDS = 180; // one full day cycle (sore→malam)
+/** @deprecated use DAY_SECONDS — kept for older imports */
+export const MATCH_SECONDS = DAY_SECONDS;
 
 /**
- * Progress 0..1 over match maps to visual phase.
+ * Progress within a single day (0..1). For looping, pass fractional day progress.
  * afternoon (0–0.35) → sunset (0.35–0.65) → night (0.65–1)
  */
 export function phaseFromProgress(p) {
-  if (p < 0.35) return 'afternoon';
-  if (p < 0.65) return 'sunset';
+  const x = ((p % 1) + 1) % 1;
+  if (x < 0.35) return 'afternoon';
+  if (x < 0.65) return 'sunset';
   return 'night';
 }
 
 export function lightingForProgress(p) {
-  // interpolate key colors
+  const x = ((p % 1) + 1) % 1;
   const afternoon = {
     ambient: 0x3a4038,
     ambientInt: 0.45,
@@ -41,16 +48,20 @@ export function lightingForProgress(p) {
     clear: 0x050608,
   };
 
-  if (p < 0.35) {
-    const t = p / 0.35;
-    const a = lerpLight(afternoon, sunset, t * 0.35); a._key = Math.floor(p * 40); return a;
+  if (x < 0.35) {
+    const t = x / 0.35;
+    const a = lerpLight(afternoon, sunset, t);
+    a._key = Math.floor(x * 40);
+    return a;
   }
-  if (p < 0.65) {
-    const t = (p - 0.35) / 0.3;
-    const b = lerpLight(sunset, night, t); b._key = Math.floor(p * 40); return b;
+  if (x < 0.65) {
+    const t = (x - 0.35) / 0.3;
+    const b = lerpLight(sunset, night, t);
+    b._key = Math.floor(x * 40);
+    return b;
   }
   const nightOut = { ...night };
-  nightOut._key = Math.floor(p * 40);
+  nightOut._key = Math.floor(x * 40);
   return nightOut;
 }
 
@@ -76,7 +87,6 @@ function lerpColor(c1, c2, t) {
   return (r << 16) | (g << 8) | b;
 }
 
-/** Random spawn on ring around player, away from center clear zone */
 export function randomMonsterSpawn(playerPos, minR = 45, maxR = 110) {
   const ang = Math.random() * Math.PI * 2;
   const r = minR + Math.random() * (maxR - minR);

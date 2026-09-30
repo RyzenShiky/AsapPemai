@@ -4,6 +4,7 @@ import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { WORLD, tileSeed } from '../core/WorldConfig.js';
 import { BUILDING_DEFS, nearBuilding } from '../core/Buildings.js';
 import { recommendGraphics } from '../core/Device.js';
+import { groundHeight } from '../core/Collision.js';
 
 export class Renderer {
   constructor() {
@@ -79,7 +80,7 @@ export class Renderer {
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const y = pos.getY(i);
-      pos.setZ(i, Math.sin(x * 0.15) * Math.cos(y * 0.12) * 0.35);
+      pos.setZ(i, groundHeight(x, -y));
     }
     groundGeo.computeVertexNormals();
     this.ground = new THREE.Mesh(
@@ -149,18 +150,35 @@ export class Renderer {
       this.playerTemplate = this._fallbackPlayer();
     }
 
+    // Monster index 1 = Smily GLB (normalized). Fallback = silhouette.
+    let smily = null, smilyClips = [];
+    try {
+      const g = await loader.loadAsync('./assets/smily_horror_monster.glb');
+      const model = g.scene;
+      const box = new THREE.Box3().setFromObject(model, true);
+      model.scale.multiplyScalar(2.4 / box.getSize(new THREE.Vector3()).y);
+      box.setFromObject(model, true);
+      const c = box.getCenter(new THREE.Vector3());
+      model.position.set(-c.x, -box.min.y, -c.z);
+      model.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
+      smily = new THREE.Group();
+      smily.add(model);
+      smilyClips = g.animations || [];
+    } catch (e) {
+      console.warn('smily load failed', e);
+    }
+
     for (let i = 0; i < 2; i++) {
-      const m = this.monsterTemplate.clone(true);
-      m.traverse((c) => {
-        if (c.isMesh && c.material) c.material = c.material.clone();
-      });
-      this.scene.add(m);
-      // Only bind AnimationMixer when clips exist AND mesh has matching bones
-      if (this.monsterAnimations && this.monsterAnimations.length) {
-        m.userData.anim = this._setupAnimated(m, this.monsterAnimations, 'Patrol');
-      } else {
-        m.userData.anim = null;
+      const useSmily = i === 1 && smily;
+      const m = useSmily ? smily : this.monsterTemplate.clone(true);
+      if (!useSmily) {
+        m.traverse((c) => {
+          if (c.isMesh && c.material) c.material = c.material.clone();
+        });
       }
+      this.scene.add(m);
+      const clips = useSmily ? smilyClips : this.monsterAnimations;
+      m.userData.anim = clips && clips.length ? this._setupAnimated(m, clips, null) : null;
       this.monsterMeshes.push(m);
       this._attachNameTag(m, '', 'monster-' + i);
     }
@@ -666,7 +684,7 @@ export class Renderer {
           trunks.push({ x, z, scale });
           crowns.push({ x, z, scale });
         }
-        const rockCount = Math.max(0, Math.floor((1 + Math.floor(tileSeed(tx, tz, 99) * 2)) * ((this.gfx && this.gfx.foliageScale) || 1)));
+        const rockCount = 1 + Math.floor(tileSeed(tx, tz, 99) * 2);
         for (let i = 0; i < rockCount; i++) {
           const sx = tileSeed(tx, tz, 200 + i * 2);
           const sz = tileSeed(tx, tz, 201 + i * 2);
@@ -685,13 +703,13 @@ export class Renderer {
     trunkIM.castShadow = this.gfx.shadows;
     crownIM.castShadow = this.gfx.shadows;
     trunks.forEach((t, i) => {
-      dummy.position.set(t.x, 2.75 * t.scale, t.z);
+      dummy.position.set(t.x, groundHeight(t.x, t.z) + 2.75 * t.scale, t.z);
       dummy.scale.setScalar(t.scale);
       dummy.updateMatrix();
       trunkIM.setMatrixAt(i, dummy.matrix);
     });
     crowns.forEach((t, i) => {
-      dummy.position.set(t.x, 5.2 * t.scale, t.z);
+      dummy.position.set(t.x, groundHeight(t.x, t.z) + 5.2 * t.scale, t.z);
       dummy.scale.setScalar(t.scale);
       dummy.updateMatrix();
       crownIM.setMatrixAt(i, dummy.matrix);
@@ -704,7 +722,7 @@ export class Renderer {
     const rockIM = new THREE.InstancedMesh(rockGeo, rockMat, rocks.length);
     rockIM.castShadow = this.gfx.shadows;
     rocks.forEach((r, i) => {
-      dummy.position.set(r.x, 0.4 * r.scale, r.z);
+      dummy.position.set(r.x, groundHeight(r.x, r.z) + 0.4 * r.scale, r.z);
       dummy.scale.setScalar(r.scale);
       dummy.rotation.set(r.rot, r.rot * 1.5, 0);
       dummy.updateMatrix();

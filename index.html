@@ -64,7 +64,24 @@
         <div class="fog-layer" aria-hidden="true"></div>
         <h1 class="flicker-title" data-text="LONGWAY">LONGWAY</h1>
         <p class="subtitle">Don't make a sound.</p>
+        <p class="subtitle" style="font-size:0.65rem;opacity:0.5">Smily model: Bento / Kritis (CC Attribution, Sketchfab)</p>
         <p id="menu-player-name" class="subtitle"></p>
+        <label class="mode-label">Mode
+          <select id="game-mode">
+            <option value="endless" selected>Tanpa akhir</option>
+            <option value="days">Batas hari</option>
+          </select>
+        </label>
+        <label class="mode-label" id="day-limit-wrap">Hari
+          <select id="day-limit">
+            <option value="1">1 hari</option>
+            <option value="2">2 hari</option>
+            <option value="3" selected>3 hari</option>
+            <option value="5">5 hari</option>
+            <option value="7">7 hari</option>
+            <option value="14">14 hari</option>
+          </select>
+        </label>
         <button id="btn-start" class="btn primary">Start Game</button>
         <button id="btn-continue" class="btn" disabled>Continue</button>
         <button id="btn-multi" class="btn">Multiplayer</button>
@@ -109,7 +126,7 @@
         <div id="crosshair">+</div>
         <div id="heart-rate"><span id="heart-icon">♥</span> <span id="heart-bpm">70</span> BPM</div>
         <div id="monster-dist"></div>
-        <div id="match-timer">3:00</div>
+        <div id="match-timer">Hari 1</div>
         <div id="phase-label">SORE</div>
         <div id="location-hint" class="hidden"></div>
         <div id="weather-label"></div>
@@ -151,6 +168,6 @@
     <button id="bb-close" class="btn" type="button">Close</button>
     <p id="bb-status" class="subtitle"></p>
   </div>
-  <script type="module" src="./js/main.js?v=3.2"></script>
+  <script type="module" src="./js/main.js?v=4.1"></script>
 </body>
 </html>

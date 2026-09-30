@@ -1,10 +1,13 @@
+const SUSPICION_GAIN = 80;
+const MAX_PER_SOUND = 40;
+
 export class SuspicionSystem {
   constructor() {
     this.value = 0;
   }
 
   static intensityToSuspicion(perceived, atten = 1) {
-    return Math.min(40, perceived * 55 * atten);
+    return Math.min(MAX_PER_SOUND, perceived * SUSPICION_GAIN * atten);
   }
 
   add(amount) {

@@ -7,7 +7,7 @@ import { loadProfile, saveProfile, ensureUid } from './core/Profile.js';
 import { PlayerController } from './gameplay/Player.js';
 import { MonsterController } from './gameplay/Monster.js';
 import { nearestMonsterDist, heartFromDistance } from './gameplay/Proximity.js';
-import { MATCH_SECONDS, phaseFromProgress, lightingForProgress, randomMonsterSpawn } from './core/DayCycle.js';
+import { DAY_SECONDS, MATCH_SECONDS, phaseFromProgress, lightingForProgress, randomMonsterSpawn } from './core/DayCycle.js';
 import { isInsideBuilding } from './core/Buildings.js';
 import { SanityManager } from './gameplay/Sanity.js';
 import { JumpscareManager } from './gameplay/Jumpscare.js';
@@ -30,7 +30,7 @@ let room = null;
 let mode = 'solo';
 let netWriteAcc = 0;
 let profile = loadProfile();
-const ESCAPE_TIME = MATCH_SECONDS;
+const DAY_LEN = DAY_SECONDS;
 let heartAcc = 0;
 let lastNearDist = Infinity;
 let sanity = new SanityManager();
@@ -39,6 +39,10 @@ let pacing = new PacingDirector();
 let dread = null;
 let vehicleControllers = [];
 let jumpscareHideTimer = null;
+let autosaveAcc = 0;
+let startingMulti = false;
+let lastSentSoundId = null;
+const netSeen = new Map();
 
 async function init() {
   const canvas = document.getElementById('game-canvas');
@@ -176,49 +180,78 @@ function enterMenu() {
 }
 
 function setupLocalGame(fromSave = false) {
-  if (fromSave) state = GameState.loadLocal() || new GameState();
-  else {
-    if (mode === 'solo') GameState.clearSave();
-    state = new GameState();
+  if (player) player.dispose();
+
+  let loaded = null;
+  if (fromSave) {
+    loaded = GameState.loadLocal();
+    if (loaded && (loaded.data.progress.gameOver || loaded.data.player.alive === false)) loaded = null;
   }
+  const resumed = !!loaded;
+  if (!resumed && mode === 'solo') GameState.clearSave();
+  state = loaded || new GameState();
+
+  autosaveAcc = 0;
+  lastSentSoundId = null;
+  netSeen.clear();
+
   player = new PlayerController(
     document.getElementById('game-canvas'),
     state,
     colliders,
     audio
   );
+
   const MONSTER_COUNT = 2;
-  state.data.monsters = Array.from({ length: MONSTER_COUNT }, (_, i) => ({
-    id: 'm' + i,
-    position: { x: 0, y: 0, z: 0 },
-    rotation: { yaw: 0 },
-    aiState: 'PATROL',
-    active: true,
-    memory: {
-      lastHeardPosition: null, lastHeardTime: 0, lastHeardIntensity: 0,
-      confidence: 0, suspicion: 0, searchRadius: 14,
-    },
-    path: [],
-  }));
-  const used = [];
-  for (let i = 0; i < MONSTER_COUNT; i++) {
-    let spawn;
-    for (let tries = 0; tries < 12; tries++) {
-      spawn = randomMonsterSpawn(state.data.player.position, 50 + i * 20, 120 + i * 30);
-      if (used.every((u) => Math.hypot(u.x - spawn.x, u.z - spawn.z) > 40)) break;
+  if (!resumed) {
+    state.data.monsters = Array.from({ length: MONSTER_COUNT }, (_, i) => ({
+      id: 'm' + i,
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { yaw: 0 },
+      aiState: 'PATROL',
+      active: true,
+      memory: {
+        lastHeardPosition: null, lastHeardTime: 0, lastHeardIntensity: 0,
+        confidence: 0, suspicion: 0, searchRadius: 14,
+      },
+      path: [],
+    }));
+    const used = [];
+    for (let i = 0; i < MONSTER_COUNT; i++) {
+      let spawn;
+      for (let tries = 0; tries < 12; tries++) {
+        spawn = randomMonsterSpawn(state.data.player.position, 50 + i * 20, 120 + i * 30);
+        if (used.every((u) => Math.hypot(u.x - spawn.x, u.z - spawn.z) > 40)) break;
+      }
+      used.push(spawn);
+      const mon = state.data.monsters[i];
+      mon.position.x = spawn.x;
+      mon.position.y = 0;
+      mon.position.z = spawn.z;
+      mon.active = true;
+      mon.aiState = 'PATROL';
+      mon.memory.suspicion = 0;
     }
-    used.push(spawn);
-    const mon = state.data.monsters[i];
-    mon.position.x = spawn.x;
-    mon.position.y = 0;
-    mon.position.z = spawn.z;
-    mon.active = true;
-    mon.aiState = 'PATROL';
-    mon.memory.suspicion = 0;
+    state.data.world.elapsed = 0;
+  } else {
+    for (const mon of state.data.monsters) {
+      mon.stunnedUntil = 0;
+      mon.memory._ghostInvestigate = false;
+      mon.memory._nextGhostCheck = 0;
+    }
   }
-  state.data.world.elapsed = 0;
-  state.data.world.timeLimit = MATCH_SECONDS;
+
+  state.data.world.activeSoundEvents = [];
   state.data.progress.timeUp = false;
+  if (!resumed) {
+    const modeEl = document.getElementById('game-mode');
+    const dayEl = document.getElementById('day-limit');
+    state.data.world.gameMode = modeEl?.value === 'days' ? 'days' : 'endless';
+    state.data.world.dayLimit = Math.max(1, parseInt(dayEl?.value || '3', 10) || 3);
+    state.data.world.daysSurvived = 0;
+    state.data.world.daySeconds = DAY_LEN;
+    state.data.progress.daysReached = 0;
+  }
   sanity = new SanityManager();
   jumpscare = new JumpscareManager();
   pacing = new PacingDirector();
@@ -229,9 +262,10 @@ function setupLocalGame(fromSave = false) {
   player.onThrow = (from, to) => {
     if (renderer && renderer.spawnThrowable) renderer.spawnThrowable(from, to);
   };
-  monsters = state.data.monsters.map((_, i) => new MonsterController(state, i, colliders, room));
+  monsters = state.data.monsters.map(
+    (_, i) => new MonsterController(state, i, colliders, mode === 'multi' ? room : null)
+  );
 
-  // Touch controls
   if (isTouchDevice()) {
     if (!touch) {
       touch = new TouchControls(document.getElementById('ui-root'), player.keys, (dx, dy) => {
@@ -241,16 +275,17 @@ function setupLocalGame(fromSave = false) {
       touch.keys = player.keys;
     }
     touch.onHide = () => player.toggleHide();
-      touch.onThrowBtn = () => player.throwDistraction();
-      touch.onFlashToggle = () => {
-        player.flashlightOn = !player.flashlightOn;
-        if (state.data.player) state.data.player.flashlight = player.flashlightOn;
-      };
-      touch.show();
+    touch.onThrowBtn = () => player.throwDistraction();
+    touch.onFlashToggle = () => {
+      player.flashlightOn = !player.flashlightOn;
+      if (state.data.player) state.data.player.flashlight = player.flashlightOn;
+    };
+    touch.show();
   }
 }
 
 function hideTouch() {
+
   if (touch) touch.hide();
 }
 
@@ -278,7 +313,6 @@ function renderLobbyPlayers() {
     startBtn.classList.add('hidden');
     status.textContent = room.meta?.started ? 'Host started…' : 'Waiting for host…';
   }
-  if (!room.isHost && room.meta?.started && !running) beginMultiGame();
 }
 
 function enterLobby() {
@@ -288,24 +322,38 @@ function enterLobby() {
   renderLobbyPlayers();
   room.onUpdate = () => {
     renderLobbyPlayers();
-    if (room.meta?.started && !running && !room.isHost) beginMultiGame();
+    if (room.meta?.started && !room.isHost) beginMultiGame();
   };
 }
 
 async function beginMultiGame() {
-  if (running) return;
-  mode = 'multi';
-  document.getElementById('lobby-screen').classList.add('hidden');
-  document.getElementById('loading-screen').classList.remove('hidden');
-  setupLocalGame(false);
-  await audio.resume();
-  document.getElementById('loading-screen').classList.add('hidden');
-  document.getElementById('hud').classList.remove('hidden');
-  document.getElementById('room-hud').textContent =
-    `Room ${room.code}${room.isHost ? ' (HOST)' : ''}`;
-  document.getElementById('room-hud').classList.remove('hidden');
-  document.getElementById('game-canvas').focus();
-  startLoop();
+  if (running || startingMulti || !room) return;
+  startingMulti = true;
+  room.onUpdate = null;
+  try {
+    mode = 'multi';
+    document.getElementById('lobby-screen').classList.add('hidden');
+    document.getElementById('loading-screen').classList.remove('hidden');
+    setupLocalGame(false);
+    await audio.resume();
+    document.getElementById('loading-screen').classList.add('hidden');
+    document.getElementById('hud').classList.remove('hidden');
+    document.getElementById('room-hud').textContent =
+      `Room ${room.code}${room.isHost ? ' (HOST)' : ''}`;
+    document.getElementById('room-hud').classList.remove('hidden');
+    document.getElementById('game-canvas').focus();
+    startLoop();
+  } finally {
+    startingMulti = false;
+  }
+}
+
+async function leaveRoom() {
+  if (!room) return;
+  const r = room;
+  room = null;
+  try { await r.leave(); } catch (e) { console.warn('leave room', e); }
+  renderer?.pruneRemotePlayers(new Set());
 }
 
 function wireUI(canvas) {
@@ -385,6 +433,14 @@ function wireUI(canvas) {
     document.getElementById('menu-screen').classList.add('hidden');
     document.getElementById('login-screen').classList.remove('hidden');
   });
+
+    const modeSelect = document.getElementById('game-mode');
+  const dayWrap = document.getElementById('day-limit-wrap');
+  const syncModeUI = () => {
+    if (dayWrap) dayWrap.style.display = modeSelect?.value === 'days' ? '' : 'none';
+  };
+  modeSelect?.addEventListener('change', syncModeUI);
+  syncModeUI();
 
   document.getElementById('btn-start').addEventListener('click', async () => {
     mode = 'solo';
@@ -490,27 +546,32 @@ function wireUI(canvas) {
     }
   });
 
-  document.getElementById('btn-lobby-leave').addEventListener('click', () => {
-    if (room) { room.dispose(); room = null; }
+  document.getElementById('btn-lobby-leave').addEventListener('click', async () => {
+    await leaveRoom();
     document.getElementById('lobby-screen').classList.add('hidden');
     document.getElementById('multi-screen').classList.remove('hidden');
   });
 
-  document.getElementById('btn-restart').addEventListener('click', () => {
+  document.getElementById('btn-restart').addEventListener('click', async () => {
     document.getElementById('gameover-screen').classList.add('hidden');
     running = false;
     hideTouch();
+    await leaveRoom();
     mode = 'solo';
     setupLocalGame(false);
+    await audio.resume();
+    document.getElementById('room-hud').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
+    document.getElementById('game-canvas').focus();
     startLoop();
   });
-  document.getElementById('btn-menu').addEventListener('click', () => {
+  document.getElementById('btn-menu').addEventListener('click', async () => {
     running = false;
     hideTouch();
-    if (room) { room.dispose(); room = null; }
+    await leaveRoom();
     document.getElementById('gameover-screen').classList.add('hidden');
     document.getElementById('hud').classList.add('hidden');
+    document.getElementById('room-hud').classList.add('hidden');
     document.getElementById('menu-screen').classList.remove('hidden');
     refreshContinueBtn();
   });
@@ -527,14 +588,20 @@ function showGameOver(win) {
   running = false;
   hideTouch();
   document.exitPointerLock?.();
+  audio?.setRain?.(false);
+  audio?.setSanityFilter?.(0);
+  if (state) state._lastRaining = false;
   document.getElementById('hud').classList.add('hidden');
   document.getElementById('gameover-screen').classList.remove('hidden');
   document.getElementById('go-title').textContent = win ? 'YOU ESCAPED' : 'YOU DIED';
+  const days = state?.data?.world?.daysSurvived || state?.data?.progress?.daysReached || 0;
   document.getElementById('go-sub').textContent = win
-    ? (state?.data?.progress?.timeUp ? 'Bertahan 3 menit — kamu selamat.' : 'Survived the forest.')
-    : 'The forest claimed another soul.';
+    ? (state?.data?.progress?.timeUp
+        ? `Bertahan ${days} hari — kamu selamat.`
+        : `Survived the forest (${days} hari).`)
+    : `The forest claimed another soul. (${days} hari)`;
   if (mode === 'solo') {
-    state.saveLocal();
+    GameState.clearSave();
     refreshContinueBtn();
   }
 }
@@ -802,12 +869,7 @@ function startLoop() {
     state.data.world.activeSoundEvents = state.data.world.activeSoundEvents.filter(
       (e) => now - e.timestamp < 3
     );
-    state.data.progress.playTime = clock.elapsed;
-
-    if (mode === 'solo' && !state.data.progress.gameOver && state.data.player.alive && clock.elapsed >= ESCAPE_TIME) {
-      state.data.progress.gameOver = true;
-      state.data.progress.win = true;
-    }
+    state.data.progress.playTime = state.data.world.elapsed || 0;
 
     if (state.data.progress.gameOver) {
       showGameOver(state.data.progress.win);
@@ -815,9 +877,13 @@ function startLoop() {
       return;
     }
 
-    if (mode === 'solo' && Math.floor(clock.elapsed) % 20 === 0 && dt > 0 && Math.random() < dt) {
-      state.saveLocal();
-      refreshContinueBtn();
+    if (mode === 'solo') {
+      autosaveAcc += dt;
+      if (autosaveAcc >= 15) {
+        autosaveAcc = 0;
+        state.saveLocal();
+        refreshContinueBtn();
+      }
     }
 
     if (room) {
@@ -834,14 +900,26 @@ function startLoop() {
           room.writeVehicles(vehicleControllers);
           room.writeGame(state.data.progress, state.data.world.weather);
         }
-        const last = state.data.world.activeSoundEvents.at(-1);
-        if (last && now - last.timestamp < 0.15) room.writeSound(last);
+        let last = null;
+        const evs = state.data.world.activeSoundEvents;
+        for (let i = evs.length - 1; i >= 0; i--) {
+          if (!evs[i].net) { last = evs[i]; break; }
+        }
+        if (last && last.id !== lastSentSoundId) {
+          lastSentSoundId = last.id;
+          room.writeSound(last);
+        }
       }
       if (room.isHost) {
+        const nowMs = performance.now();
         for (const s of room.remoteSounds) {
-          if (!s || performance.now() - (s.t || 0) > 2000) continue;
+          if (!s || s.by === room.uid) continue;
+          const id = `net_${s.by}_${s.t}`;
+          if (netSeen.has(id)) continue;
+          netSeen.set(id, nowMs);
           state.data.world.activeSoundEvents.push({
-            id: 'net_' + s.t,
+            id,
+            net: true,
             position: { x: s.x, y: s.y || 0, z: s.z },
             intensity: s.intensity || 0.4,
             radius: s.radius || 14,
@@ -849,6 +927,7 @@ function startLoop() {
             timestamp: now,
           });
         }
+        for (const [k, tt] of netSeen) if (nowMs - tt > 5000) netSeen.delete(k);
       }
       const active = new Set();
       for (const [uid, p] of Object.entries(room.remotePlayers)) {
@@ -873,29 +952,43 @@ function startLoop() {
     const eye = player.eyePosition;
     const yaw = state.data.player.rotation.yaw;
     audio.setListenerPosition(eye.x, eye.y, eye.z, -Math.sin(yaw), -Math.cos(yaw));
-    // --- 3 min day cycle (afternoon → sunset → night) ---
-    const limit = state.data.world.timeLimit || MATCH_SECONDS;
+    // --- Day cycle (loops). Endless or win after N days. ---
+    const daySec = state.data.world.daySeconds || DAY_LEN;
     state.data.world.elapsed = (state.data.world.elapsed || 0) + dt;
-    const progress = Math.min(1, state.data.world.elapsed / limit);
-    state.data.world.timeOfDay = 0.55 + progress * 0.4;
-    const lights = lightingForProgress(progress);
+    const totalDays = state.data.world.elapsed / daySec;
+    const dayIndex = Math.floor(totalDays); // 0-based completed fraction
+    const dayProgress = totalDays - dayIndex; // 0..1 within current day
+    state.data.world.daysSurvived = dayIndex;
+    state.data.progress.daysReached = dayIndex;
+    state.data.world.timeOfDay = dayProgress;
+    const lights = lightingForProgress(dayProgress);
     if (renderer.applyDayLighting) renderer.applyDayLighting(lights);
-    const phase = phaseFromProgress(progress);
-    const remain = Math.max(0, limit - state.data.world.elapsed);
-    const mm = Math.floor(remain / 60);
-    const ss = Math.floor(remain % 60);
+    const phase = phaseFromProgress(dayProgress);
     const timerEl = document.getElementById('match-timer');
     if (timerEl) {
-      timerEl.textContent = mm + ':' + String(ss).padStart(2, '0');
-      timerEl.classList.toggle('urgent', remain <= 30);
+      const gMode = state.data.world.gameMode || 'endless';
+      if (gMode === 'days') {
+        const limit = state.data.world.dayLimit || 3;
+        const left = Math.max(0, limit - dayIndex);
+        timerEl.textContent = `Hari ${dayIndex + 1}/${limit}`;
+        timerEl.classList.toggle('urgent', left <= 1 && dayProgress > 0.7);
+      } else {
+        timerEl.textContent = `Hari ${dayIndex + 1}`;
+        timerEl.classList.remove('urgent');
+      }
     }
     const phaseEl = document.getElementById('phase-label');
     if (phaseEl) {
       phaseEl.textContent =
         phase === 'afternoon' ? 'SORE' : phase === 'sunset' ? 'SENJA' : 'MALAM';
     }
-    // Survive full 3 minutes = win
-    if (remain <= 0 && !state.data.progress.gameOver && state.data.player.alive) {
+    // Win only in "days" mode after surviving dayLimit full cycles
+    if (
+      (state.data.world.gameMode || 'endless') === 'days' &&
+      dayIndex >= (state.data.world.dayLimit || 3) &&
+      !state.data.progress.gameOver &&
+      state.data.player.alive
+    ) {
       state.data.progress.gameOver = true;
       state.data.progress.win = true;
       state.data.progress.timeUp = true;
@@ -1003,7 +1096,16 @@ function startLoop() {
       } else loc.classList.add('hidden');
     }
     renderer.render(state.data, eye, yaw, state.data.player.rotation.pitch, dt);
-    requestAnimationFrame(frame);
+  }
+
+  function frame() {
+    if (!running) return;
+    try {
+      step();
+    } catch (e) {
+      console.error('frame error', e);
+    }
+    if (running) requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 }

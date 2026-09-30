@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js';
 import {
-  getDatabase, ref, set, update, onValue, onDisconnect, get, push,
+  getDatabase, ref, set, update, onValue, onDisconnect, get, push, remove,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js';
 import {
   getStorage, ref as sRef, uploadBytes, getDownloadURL,
@@ -239,8 +239,8 @@ export class MultiplayerRoom {
   }
 
   writeSound(ev) {
-    const sref = push(ref(this.db, `rooms/${this.code}/soundEvents`));
-    return set(sref, {
+    // one slot per player — does not pile up forever in DB
+    return set(ref(this.db, `rooms/${this.code}/soundEvents/${this.uid}`), {
       x: ev.position.x,
       y: ev.position.y || 0,
       z: ev.position.z,
@@ -300,6 +300,17 @@ export class MultiplayerRoom {
     };
     if (weather) payload.weather = weather;
     return set(ref(this.db, `rooms/${this.code}/game`), payload);
+  }
+
+  async leave() {
+    this.dispose();
+    const base = `rooms/${this.code}`;
+    try {
+      await onDisconnect(ref(this.db, `${base}/players/${this.uid}`)).cancel();
+      if (this.isHost) await onDisconnect(ref(this.db, `${base}/meta/hostUid`)).cancel();
+    } catch (e) { /* ignore */ }
+    await remove(ref(this.db, `${base}/players/${this.uid}`));
+    if (this.isHost) await set(ref(this.db, `${base}/meta/hostUid`), null);
   }
 
   dispose() {

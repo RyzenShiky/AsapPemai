@@ -142,20 +142,20 @@ export class VehicleController {
     }
   }
 
-  /** High-speed hit stuns monster; low-speed hurts rider. */
+  /** High-speed hit stuns monster; low-speed hurts rider (with cooldown). */
   checkMonsterHits(monsters, now, applyDamageToRiders) {
     for (const m of monsters) {
       if (!m || m.active === false) continue;
       if (m.aiState === 'STUNNED' && m.stunnedUntil && now < m.stunnedUntil) continue;
       const hitR = this.type === 'mobil' ? 1.6 : 1.0;
-      if (distXZ(this.position, m.position) < hitR) {
-        if (Math.abs(this.speed) > 6) {
-          m.aiState = 'STUNNED';
-          m.stunnedUntil = now + (this.type === 'mobil' ? 4 : 2);
-          this.speed *= 0.5;
-        } else if (Math.abs(this.speed) < 3) {
-          applyDamageToRiders?.(25);
-        }
+      if (distXZ(this.position, m.position) >= hitR) continue;
+      if (Math.abs(this.speed) > 6) {
+        m.aiState = 'STUNNED';
+        m.stunnedUntil = now + (this.type === 'mobil' ? 4 : 2);
+        this.speed *= 0.5;
+      } else if (Math.abs(this.speed) < 3 && now >= (this._nextRiderHitAt || 0)) {
+        this._nextRiderHitAt = now + 1.2;
+        applyDamageToRiders?.(25);
       }
     }
   }

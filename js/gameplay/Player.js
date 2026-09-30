@@ -19,9 +19,21 @@ export class PlayerController {
     this._lookDX = 0;
     this._lookDY = 0;
     this._footAcc = 0;
+    this._spaceDown = false;
     this.flashlightOn = false;
 
+    this._abort = new AbortController();
+    const opt = { signal: this._abort.signal };
+    const typing = (e) => {
+      const t = e.target;
+      return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    };
+
     window.addEventListener('keydown', (e) => {
+      if (typing(e)) return;
+      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(e.code)) e.preventDefault();
+      if (e.code === 'Space') this._spaceDown = true;
+      this.keys.add(e.code);
       if (e.repeat) return;
       if (e.code === 'KeyF') {
         this.flashlightOn = !this.flashlightOn;
@@ -29,32 +41,34 @@ export class PlayerController {
       }
       if (e.code === 'KeyH') this.toggleHide();
       if (e.code === 'KeyQ') this.throwDistraction();
-    });
-    this._spaceDown = false;
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space') { this._spaceDown = true; e.preventDefault(); }
-    });
+    }, opt);
+
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space') this._spaceDown = false;
-    });
+      this.keys.delete(e.code);
+    }, opt);
 
-    window.addEventListener('keydown', (e) => {
-      this.keys.add(e.code);
-      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(e.code)) e.preventDefault();
-    });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this._spaceDown = false;
+    }, opt);
+
     canvas.addEventListener('click', () => {
-      if (!('ontouchstart' in window)) canvas.requestPointerLock();
-    });
+      if (window.matchMedia('(pointer: fine)').matches) canvas.requestPointerLock?.();
+    }, opt);
     document.addEventListener('pointerlockchange', () => {
       this.pointerLocked = document.pointerLockElement === canvas;
-    });
+    }, opt);
     document.addEventListener('mousemove', (e) => {
       if (!this.pointerLocked) return;
       this.applyLook(e.movementX, e.movementY, this.sensitivity);
-    });
+    }, opt);
   }
 
+  dispose() {
+    this._abort.abort();
+    this.keys.clear();
+  }
 
   toggleHide() {
     const p = this.state.data.player;
@@ -201,8 +215,8 @@ export class PlayerController {
       return; // no footsteps while hiding
     }
 
-    p.isCrouching = this.keys.has('ControlLeft') || this.keys.has('KeyC');
-    p.isRunning = this.keys.has('ShiftLeft') && !p.isCrouching && p.stamina > 5;
+    p.isCrouching = this.keys.has('KeyC');
+    p.isRunning = (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) && !p.isCrouching && p.stamina > 5;
 
     let speed = WALK;
     if (p.isCrouching) speed = CROUCH;

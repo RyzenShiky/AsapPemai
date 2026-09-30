@@ -3,8 +3,29 @@ import { recordHeard } from './Memory.js';
 import { tileSeed, worldToTile } from '../core/WorldConfig.js';
 import { sharedBlackboard } from './Blackboard.js';
 
+// Per monster: events already reacted to (event id -> first-heard time).
+const heardBy = new WeakMap();
+const FORGET_AFTER = 6;
+
+function firstTimeHeard(monster, ev, now) {
+  let seen = heardBy.get(monster);
+  if (!seen) {
+    seen = new Map();
+    heardBy.set(monster, seen);
+  }
+  for (const [k, t] of seen) {
+    if (now - t > FORGET_AFTER) seen.delete(k);
+  }
+  const key = ev.id ?? ev;
+  if (seen.has(key)) return false;
+  seen.set(key, now);
+  return true;
+}
+
 function distance(a, b) {
-  const dx = a.x - b.x, dy = (a.y || 0) - (b.y || 0), dz = a.z - b.z;
+  const dx = a.x - b.x;
+  const dy = (a.y || 0) - (b.y || 0);
+  const dz = a.z - b.z;
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
@@ -31,14 +52,16 @@ export function processHearing(monster, events, now, suspicion, weatherMul = 1) 
     const occ = forestOcclusion(ev.position, monster.position);
     const perceived = ev.intensity * atten * occ * weatherMul;
     if (perceived < 0.05) continue;
+
     heard.push(ev);
+
+    if (!firstTimeHeard(monster, ev, now)) continue;
     suspicion.add(SuspicionSystem.intensityToSuspicion(perceived, atten * occ));
     recordHeard(monster.memory, ev.position, perceived, now);
     monster.memory.suspicion = suspicion.value;
     sharedBlackboard.reportHeard(monster.id || 'm0', ev.position, perceived, now);
   }
 
-  // Shared hint from other monsters
   const hint = sharedBlackboard.pollHint(monster.id || 'm0', now);
   if (hint && (!monster.memory.lastHeardTime || now - monster.memory.lastHeardTime > 1.5)) {
     if (hint.intensity > 0.08) {

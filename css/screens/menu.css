@@ -31,3 +31,13 @@
   width: 36px; height: 36px; border-radius: 50%; border: 2px solid transparent; cursor: pointer;
 }
 .color-swatch.selected { border-color: #fff; }
+
+.mode-label {
+  display: flex; flex-direction: column; gap: 0.25rem;
+  width: min(80vw, 280px); font-size: 0.75rem; letter-spacing: 0.08em;
+  color: var(--color-muted); text-transform: uppercase;
+}
+.mode-label select {
+  padding: 0.55rem 0.75rem; background: #111; border: 1px solid #444;
+  color: #eee; border-radius: 4px; font-size: 0.9rem;
+}

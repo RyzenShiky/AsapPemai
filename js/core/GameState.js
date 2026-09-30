@@ -45,8 +45,13 @@ export function createInitialState() {
       timeOfDay: 0.55,
       weather: 'clear',
       weatherTimer: 0,
-      weatherNextChange: 50, // 0=midnight … 0.5=noon … 1=next midnight; start late afternoon
-      timeLimit: 180, // 3 minutes
+      weatherNextChange: 50,
+      /** 'endless' | 'days' */
+      gameMode: 'endless',
+      /** win after this many full day cycles (only if gameMode === 'days') */
+      dayLimit: 3,
+      daysSurvived: 0,
+      daySeconds: 180,
       elapsed: 0,
       activeSoundEvents: [],
       worldEvents: {
@@ -61,6 +66,7 @@ export function createInitialState() {
       gameOver: false,
       win: false,
       timeUp: false,
+      daysReached: 0,
     },
     version: 3,
   };
