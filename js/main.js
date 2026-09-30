@@ -771,7 +771,7 @@ function startLoop() {
   if (running) return;
   running = true;
   tryLandscapeLock();
-  function frame() {
+  function step() {
     if (!running) return;
     const dt = Math.min(0.05, clock.tick()); // clamp: avoid spiral on lag spikes
     const now = performance.now() / 1000;
