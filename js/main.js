@@ -1,7 +1,7 @@
 import { GameState } from './core/GameState.js';
 import { Clock } from './core/Clock.js';
 import { buildColliders, buildSpatialGrid } from './core/Collision.js';
-import { isTouchDevice } from './core/Device.js';
+import { isTouchDevice, inputMode, watchInput, setInputPref } from './core/Device.js';
 import { onOrientationChange, updateRotateHint, tryLandscapeLock, installLandscapeAutoLock, cycleScreenRotation, autoSyncFromDevice } from './core/Orientation.js';
 import { loadProfile, saveProfile, ensureUid } from './core/Profile.js';
 import { PlayerController } from './gameplay/Player.js';
@@ -10,19 +10,25 @@ import { nearestMonsterDist, heartFromDistance } from './gameplay/Proximity.js';
 import { DAY_SECONDS, MATCH_SECONDS, phaseFromProgress, lightingForProgress, randomMonsterSpawn } from './core/DayCycle.js';
 import { isInsideBuilding } from './core/Buildings.js';
 import { SanityManager } from './gameplay/Sanity.js';
+import { HallucinationDirector } from './gameplay/HallucinationDirector.js';
 import { JumpscareManager } from './gameplay/Jumpscare.js';
 import { PacingDirector } from './core/PacingDirector.js';
+import { WorldDirector } from './core/WorldDirector.js';
+import { WeatherController } from './core/Weather.js';
+import { updateSchedule } from './core/MonsterSchedule.js';
+import { ROSTER, MAX_PLAYERS } from './core/MonsterTypes.js';
+import { weatherMul, weatherSpeed, weatherVis } from './core/Weather.js';
 import { DreadSequencer } from './audio/DreadSequencer.js';
 import { installSecretCodes } from './input/SecretCode.js';
 import { VehicleController, findDismountSpot } from './gameplay/Vehicle.js';
-import { MultiplayerRoom, roomCode as genRoomCode, initFirebase, deviceUid, uploadBillboardMedia } from './net/firebase.js';
+import { MultiplayerRoom, roomCode as genRoomCode, initFirebase, deviceUid, uploadBillboardMedia, ensureAuthUid } from './net/firebase.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Renderer } from './renderer/Renderer.js';
 import { TouchControls } from './input/TouchControls.js';
+import { binds, rebind, resetBinds } from './input/Bindings.js';
 import {
-  getAuth, signInAnonymously, GoogleAuthProvider, signInWithRedirect, getRedirectResult,
+  getAuth, GoogleAuthProvider, signInWithPopup,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js';
-import { getApp } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js';
 
 let renderer, player, monsters, audio, clock, state, colliders, touch;
 let running = false;
@@ -38,6 +44,32 @@ let jumpscare = new JumpscareManager();
 let pacing = new PacingDirector();
 let dread = null;
 let vehicleControllers = [];
+let worldDirector = null;
+let hallu = null;
+let weatherCtrl = new WeatherController();
+let hearingMask = 1;
+const claimedPickups = new Map();
+const appliedPickups = new Set();
+
+function toast(msg, ms = 3500) {
+  const el = document.getElementById('toast');
+  if (!el) { console.warn(msg); return; }
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.add('hidden'), ms);
+}
+
+function givePickupItem(pk) {
+  const p = state.data.player;
+  const inv = state.data.inventory || { slots: 4, items: [] };
+  if (pk.type === 'battery') p.battery = Math.min(100, (p.battery ?? 100) + 40);
+  else {
+    if (pk.type === 'medkit') p.medkits = (p.medkits || 0) + 1;
+    if (inv.items.length < inv.slots) inv.items.push({ type: pk.type });
+  }
+}
+
 let jumpscareHideTimer = null;
 let autosaveAcc = 0;
 let startingMulti = false;
@@ -85,7 +117,9 @@ async function init() {
   audio = new AudioManager();
   await audio.init();
   dread = new DreadSequencer(audio);
-  colliders = buildSpatialGrid(buildColliders());
+  const _rawCol = buildColliders();
+  colliders = buildSpatialGrid(_rawCol);
+  window.__wallsOnly = buildSpatialGrid(_rawCol.filter((c) => c.type === 'wall'));
   renderer = new Renderer();
   await renderer.init(canvas);
 
@@ -179,7 +213,10 @@ function enterMenu() {
   refreshContinueBtn();
 }
 
-function setupLocalGame(fromSave = false) {
+async function setupLocalGame(fromSave = false) {
+  if (renderer?.monstersReady) {
+    try { await renderer.monstersReady; } catch (e) { console.warn(e); }
+  }
   if (player) player.dispose();
 
   let loaded = null;
@@ -202,7 +239,19 @@ function setupLocalGame(fromSave = false) {
     audio
   );
 
-  const MONSTER_COUNT = 2;
+  const MONSTER_COUNT = ROSTER.length;
+  while (state.data.monsters.length < MONSTER_COUNT) {
+    const i = state.data.monsters.length;
+    state.data.monsters.push({
+      id: 'm' + i,
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { yaw: 0 },
+      aiState: 'PATROL',
+      active: false,
+      memory: { lastHeardPosition: null, lastHeardTime: 0, lastHeardIntensity: 0, confidence: 0, suspicion: 0, searchRadius: 14, canSeePlayer: false, lastSeenPosition: null, lastSeenTime: 0, routeRepeats: 0 },
+      path: [],
+    });
+  }
   if (!resumed) {
     state.data.monsters = Array.from({ length: MONSTER_COUNT }, (_, i) => ({
       id: 'm' + i,
@@ -252,9 +301,15 @@ function setupLocalGame(fromSave = false) {
     state.data.world.daySeconds = DAY_LEN;
     state.data.progress.daysReached = 0;
   }
+  claimedPickups.clear();
+  appliedPickups.clear();
   sanity = new SanityManager();
   jumpscare = new JumpscareManager();
   pacing = new PacingDirector();
+  worldDirector = null;
+  hallu = null;
+  weatherCtrl = new WeatherController();
+  hearingMask = 1;
   vehicleControllers = [];
   state.data.vehicles = [];
   hideJumpscare();
@@ -263,25 +318,35 @@ function setupLocalGame(fromSave = false) {
     if (renderer && renderer.spawnThrowable) renderer.spawnThrowable(from, to);
   };
   monsters = state.data.monsters.map(
-    (_, i) => new MonsterController(state, i, colliders, mode === 'multi' ? room : null)
+    (_, i) => new MonsterController(state, i, colliders, mode === 'multi' ? room : null, window.__wallsOnly || null)
   );
 
-  if (isTouchDevice()) {
-    if (!touch) {
-      touch = new TouchControls(document.getElementById('ui-root'), player.keys, (dx, dy) => {
-        player.applyLook(dx, dy);
-      });
-    } else {
-      touch.keys = player.keys;
-    }
-    touch.onHide = () => player.toggleHide();
-    touch.onThrowBtn = () => player.throwDistraction();
-    touch.onFlashToggle = () => {
-      player.flashlightOn = !player.flashlightOn;
-      if (state.data.player) state.data.player.flashlight = player.flashlightOn;
-    };
-    touch.show();
+  // Always create TouchControls; show/hide based on adaptive input mode
+  if (!touch) {
+    touch = new TouchControls(document.getElementById('ui-root'), player.keys, (dx, dy) => {
+      player.applyLook(dx, dy);
+    });
+  } else {
+    touch.keys = player.keys;
   }
+  touch.onHide = () => player.toggleHide();
+  touch.onThrowBtn = () => player.throwDistraction();
+  touch.onFlashToggle = () => {
+    player.flashlightOn = !player.flashlightOn;
+    if (state.data.player) state.data.player.flashlight = player.flashlightOn;
+  };
+
+  const applyInputMode = (m) => {
+    if (m === 'touch') {
+      touch?.show();
+    } else {
+      touch?.hide();
+      document.exitPointerLock?.();
+    }
+  };
+  watchInput(applyInputMode);
+  applyInputMode(inputMode());
+  if (room?.isHost && state?.data?.pickups) room.writePickups(state.data.pickups);
 }
 
 function hideTouch() {
@@ -334,7 +399,7 @@ async function beginMultiGame() {
     mode = 'multi';
     document.getElementById('lobby-screen').classList.add('hidden');
     document.getElementById('loading-screen').classList.remove('hidden');
-    setupLocalGame(false);
+    await setupLocalGame(false);
     await audio.resume();
     document.getElementById('loading-screen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
@@ -369,29 +434,18 @@ function wireUI(canvas) {
       const name = document.getElementById('profile-name').value.trim() || profile.displayName;
       profile.displayName = name.slice(0, 16);
       profile.provider = 'guest';
-      ensureUid(profile);
-      localStorage.setItem('longway_uid', profile.uid);
-      saveProfile(profile);
+      let online = true;
       try {
-        initFirebase();
-        const auth = getAuth();
-        await Promise.race([
-          signInAnonymously(auth),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('auth-timeout')), 2500)),
-        ]);
-        // IMPORTANT: the Firebase security rules gate writes to
-        // /rooms/{code}/players/{uid} on `auth.uid === $uid`. That only
-        // works if the id we use as $uid is the *real* Firebase Auth uid —
-        // not a separate random id we made up ourselves. Re-align them here
-        // so multiplayer writes don't silently fail as permission-denied.
-        if (auth.currentUser) {
-          profile.uid = auth.currentUser.uid;
-          localStorage.setItem('longway_uid', profile.uid);
-          saveProfile(profile);
-        }
+        profile.uid = await ensureAuthUid(12000);
+        localStorage.setItem('longway_uid', profile.uid);
+        saveProfile(profile);
       } catch (e) {
-        console.warn('Anonymous auth skipped:', e.message || e);
+        online = false;
+        console.warn('auth', e);
+        toast('Mode offline — multiplayer dinonaktifkan');
       }
+      const multiBtn = document.getElementById('btn-multi');
+      if (multiBtn) multiBtn.disabled = !online;
       await tryLandscapeLock();
       enterMenu();
     } catch (e) {
@@ -407,22 +461,29 @@ function wireUI(canvas) {
     const st = document.getElementById('login-status');
     const btn = document.getElementById('btn-google');
     if (err) err.textContent = '';
-    if (st) st.textContent = 'Mengalihkan ke Google…';
+    if (st) st.textContent = 'Login Google…';
     if (btn) btn.disabled = true;
     try {
       initFirebase();
       const auth = getAuth();
       const provider = new GoogleAuthProvider();
-      await signInWithRedirect(auth, provider);
+      const { user } = await signInWithPopup(auth, provider);
+      profile.displayName = (user.displayName || 'Player').slice(0, 16);
+      profile.uid = user.uid;
+      profile.provider = 'google';
+      localStorage.setItem('longway_uid', profile.uid);
+      saveProfile(profile);
+      const multiBtn = document.getElementById('btn-multi');
+      if (multiBtn) multiBtn.disabled = false;
+      await tryLandscapeLock();
+      enterMenu();
     } catch (e) {
       console.error(e);
       let msg = e.message || 'Google gagal';
       const code = String(e.code || '');
-      if (code.includes('operation-not-allowed')) {
-        msg = 'Google Auth belum aktif di Firebase Console. Pakai Guest.';
-      } else if (code.includes('unauthorized-domain')) {
-        msg = 'Domain belum di-authorize di Firebase. Pakai Guest.';
-      }
+      if (code.includes('operation-not-allowed')) msg = 'Google Auth belum aktif di Firebase Console. Pakai Guest.';
+      else if (code.includes('unauthorized-domain')) msg = 'Domain belum di-authorize di Firebase. Pakai Guest.';
+      else if (code.includes('popup-blocked')) msg = 'Popup diblokir browser. Izinkan popup lalu coba lagi.';
       if (err) err.textContent = msg;
       if (st) st.textContent = '';
       if (btn) btn.disabled = false;
@@ -446,7 +507,7 @@ function wireUI(canvas) {
     mode = 'solo';
     document.getElementById('menu-screen').classList.add('hidden');
     document.getElementById('loading-screen').classList.remove('hidden');
-    setupLocalGame(false);
+    await setupLocalGame(false);
     await audio.resume();
     document.getElementById('loading-screen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
@@ -458,7 +519,7 @@ function wireUI(canvas) {
     if (!GameState.hasSave()) return;
     mode = 'solo';
     document.getElementById('menu-screen').classList.add('hidden');
-    setupLocalGame(true);
+    await setupLocalGame(true);
     await audio.resume();
     document.getElementById('hud').classList.remove('hidden');
     canvas.focus();
@@ -468,10 +529,66 @@ function wireUI(canvas) {
   document.getElementById('btn-settings').addEventListener('click', () => {
     document.getElementById('menu-screen').classList.add('hidden');
     document.getElementById('settings-screen').classList.remove('hidden');
+    // refresh bind labels + input select
+    const sel = document.getElementById('input-mode-select');
+    if (sel) sel.value = localStorage.getItem('longway_input') || 'auto';
+    document.querySelectorAll('#bind-list [data-action]').forEach((row) => {
+      const a = row.dataset.action;
+      const btn = row.querySelector('.btn-bind');
+      if (btn) btn.textContent = binds[a] || '—';
+    });
+    const inv = document.getElementById('invert-y');
+    if (inv) inv.checked = localStorage.getItem('longway_invertY') === '1';
   });
   document.getElementById('btn-settings-back').addEventListener('click', () => {
     document.getElementById('settings-screen').classList.add('hidden');
     document.getElementById('menu-screen').classList.remove('hidden');
+  });
+
+  // Input mode select
+  document.getElementById('input-mode-select')?.addEventListener('change', (e) => {
+    setInputPref(e.target.value);
+    // apply immediately if touch controls exist
+    if (typeof touch !== 'undefined' && touch) {
+      if (inputMode() === 'touch') touch.show();
+      else { touch.hide(); document.exitPointerLock?.(); }
+    }
+  });
+
+  // Sensitivity
+  document.getElementById('look-sens')?.addEventListener('input', (e) => {
+    if (player) player.sensitivity = parseFloat(e.target.value);
+  });
+
+  // Invert Y
+  document.getElementById('invert-y')?.addEventListener('change', (e) => {
+    localStorage.setItem('longway_invertY', e.target.checked ? '1' : '0');
+    if (player) player.invertY = e.target.checked;
+  });
+
+  // Rebind buttons
+  document.querySelectorAll('#bind-list [data-action]').forEach((row) => {
+    const a = row.dataset.action;
+    const btn = row.querySelector('.btn-bind');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      btn.textContent = 'Tekan tombol…';
+      rebind(a, (code) => {
+        btn.textContent = code || binds[a];
+        // refresh other labels in case of swap
+        document.querySelectorAll('#bind-list [data-action]').forEach((r) => {
+          const b = r.querySelector('.btn-bind');
+          if (b && r.dataset.action !== a) b.textContent = binds[r.dataset.action];
+        });
+      });
+    });
+  });
+  document.getElementById('btn-reset-binds')?.addEventListener('click', () => {
+    resetBinds();
+    document.querySelectorAll('#bind-list [data-action]').forEach((row) => {
+      const btn = row.querySelector('.btn-bind');
+      if (btn) btn.textContent = binds[row.dataset.action];
+    });
   });
 
   document.getElementById('btn-multi').addEventListener('click', () => {
@@ -485,10 +602,17 @@ function wireUI(canvas) {
 
   document.getElementById('btn-host').addEventListener('click', async () => {
     try {
-      const code = genRoomCode();
-      room = new MultiplayerRoom(code, true);
-      // use profile name in join
-      await room.create();
+      room = null;
+      for (let i = 0; i < 3; i++) {
+        try {
+          room = new MultiplayerRoom(genRoomCode(), true);
+          await room.create();
+          break;
+        } catch (e) {
+          room = null;
+          if (i === 2) throw e;
+        }
+      }
       // patch name after join
       await room.writePlayer({
         position: { x: 0, y: 1.7, z: 8 },
@@ -558,7 +682,7 @@ function wireUI(canvas) {
     hideTouch();
     await leaveRoom();
     mode = 'solo';
-    setupLocalGame(false);
+    await setupLocalGame(false);
     await audio.resume();
     document.getElementById('room-hud').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
@@ -735,7 +859,7 @@ function tryVehicleInteract() {
   const p = state.data.player;
   const myUid = room?.uid || deviceUid();
   // Dismount
-  if (p.ridingVehicleId && player.keys.has('KeyE')) {
+  if (p.ridingVehicleId && player.keys.has(binds.interact)) {
     if (player._eLatch) return;
     player._eLatch = true;
     const v = state.getVehicle(p.ridingVehicleId);
@@ -750,9 +874,9 @@ function tryVehicleInteract() {
     p.ridingRole = null;
     return;
   }
-  if (!player.keys.has('KeyE')) player._eLatch = false;
+  if (!player.keys.has(binds.interact)) player._eLatch = false;
   if (p.ridingVehicleId) return;
-  if (!player.keys.has('KeyE') || player._eLatch) return;
+  if (!player.keys.has(binds.interact) || player._eLatch) return;
   for (const v of state.data.vehicles || []) {
     const d = Math.hypot(v.position.x - p.position.x, v.position.z - p.position.z);
     if (d < 2.2) {
@@ -761,6 +885,7 @@ function tryVehicleInteract() {
       if (role) {
         p.ridingVehicleId = v.id;
         p.ridingRole = role;
+        p.rotation.yaw = v.rotation.yaw; // face vehicle forward
       }
       break;
     }
@@ -805,9 +930,10 @@ function startLoop() {
     if (renderer) renderer.syncVehicles(vehicleControllers);
 
     // Remote vehicles (non-host)
-    if (room && !room.isHost && room.remoteVehicles) {
+    if (room && room.remoteVehicles) {
       const list = [];
       for (const [id, rv] of Object.entries(room.remoteVehicles)) {
+        if (rv.driver === myUid) continue;
         let v = vehicleControllers.find((x) => x.id === id);
         if (!v) {
           v = new VehicleController(rv.type || 'motor', { x: rv.x, y: rv.y, z: rv.z }, id);
@@ -843,6 +969,8 @@ function startLoop() {
         m.position.x = r.x; m.position.y = r.y; m.position.z = r.z;
         m.rotation.yaw = r.yaw;
         m.aiState = r.aiState;
+        m.active = r.active !== false;
+        if (r.type && ROSTER[i] && r.type !== ROSTER[i]) console.warn('Versi game berbeda, muat ulang halaman');
         m.memory.suspicion = r.suspicion || 0;
         m.attackCooldown = r.attackCooldown || 0;
       });
@@ -871,6 +999,11 @@ function startLoop() {
     );
     state.data.progress.playTime = state.data.world.elapsed || 0;
 
+    if (room?.isHost && !state.data.player.alive) {
+      const others = Object.entries(room.remotePlayers).filter(([u]) => u !== room.uid);
+      const allDead = others.length === 0 || others.every(([, p]) => p.alive === false);
+      if (allDead) { state.data.progress.gameOver = true; state.data.progress.win = false; }
+    }
     if (state.data.progress.gameOver) {
       showGameOver(state.data.progress.win);
       if (room && room.isHost) room.writeGame(state.data.progress, state.data.world.weather);
@@ -897,7 +1030,7 @@ function startLoop() {
         }
         if (room.isHost) {
           room.writeMonsters(state.data.monsters);
-          room.writeVehicles(vehicleControllers);
+          for (const v of vehicleControllers) room.writeVehicle(v);
           room.writeGame(state.data.progress, state.data.world.weather);
         }
         let last = null;
@@ -954,10 +1087,29 @@ function startLoop() {
     audio.setListenerPosition(eye.x, eye.y, eye.z, -Math.sin(yaw), -Math.cos(yaw));
     // --- Day cycle (loops). Endless or win after N days. ---
     const daySec = state.data.world.daySeconds || DAY_LEN;
-    state.data.world.elapsed = (state.data.world.elapsed || 0) + dt;
+    const t0 = room?.gameStatus?.t0;
+    state.data.world.elapsed = t0
+      ? (room.serverNow() - t0) / 1000
+      : (state.data.world.elapsed || 0) + dt;
     const totalDays = state.data.world.elapsed / daySec;
-    const dayIndex = Math.floor(totalDays); // 0-based completed fraction
-    const dayProgress = totalDays - dayIndex; // 0..1 within current day
+    const dayProgress = totalDays - Math.floor(totalDays);
+    const dayIndex = Math.floor(totalDays);
+    // Night-only monster schedule (host/solo)
+    if (isAuthority) {
+      const plist = [{ x: state.data.player.position.x, z: state.data.player.position.z, yaw: state.data.player.rotation.yaw }];
+      if (room?.remotePlayers) {
+        for (const [uid, rp] of Object.entries(room.remotePlayers)) {
+          if (uid === room.uid || rp.alive === false) continue;
+          plist.push({ x: rp.x, z: rp.z, yaw: rp.yaw || 0 });
+        }
+      }
+      updateSchedule(state, plist, dayProgress, dayIndex);
+    }
+    // Street lamps (deterministic, no network)
+    if (renderer?.updateLamps) {
+      state._lampSites = renderer.lampSites;
+      renderer.updateLamps(state.data.world.elapsed, dayProgress, state.data.player.position.x, state.data.player.position.z, dt);
+    }
     state.data.world.daysSurvived = dayIndex;
     state.data.progress.daysReached = dayIndex;
     state.data.world.timeOfDay = dayProgress;
@@ -997,27 +1149,105 @@ function startLoop() {
     // Keep max 1 monster
     
     
-    // Dynamic weather (host authority in multi)
+    // Dynamic weather (host authority in multi) — clear/rain/fog/storm + lightning
     if (mode === 'solo' || (room && room.isHost)) {
-      const w = state.data.world;
-      w.weatherTimer = (w.weatherTimer || 0) + dt;
-      if (w.weatherTimer >= (w.weatherNextChange || 50)) {
-        w.weatherTimer = 0;
-        w.weatherNextChange = 40 + Math.random() * 35;
-        w.weather = w.weather === 'rain' ? 'clear' : 'rain';
-      }
+      const wr = weatherCtrl.update(dt, now, state.data.world, renderer, audio);
+      hearingMask = wr.hearingMask;
+      state._hearingMask = hearingMask;
     } else if (room && room.gameStatus && room.gameStatus.weather) {
       state.data.world.weather = room.gameStatus.weather;
+      const wr = weatherCtrl.update(0, now, state.data.world, renderer, audio);
+      hearingMask = wr.hearingMask;
+      state._hearingMask = hearingMask;
     }
-    const raining = state.data.world.weather === 'rain';
-    if (raining !== state._lastRaining) {
-      state._lastRaining = raining;
-      if (renderer.setRain) renderer.setRain(raining);
-      if (audio.setRain) audio.setRain(raining);
-      const wx = document.getElementById('weather-label');
-      if (wx) wx.textContent = raining ? 'HUJAN' : '';
-      // force lighting refresh on weather flip
-      if (renderer._lastLightKey != null) renderer._lastLightKey = -1;
+
+    // Player speed modifier from weather
+    const spdMul = weatherSpeed(state.data.world.weather);
+    if (spdMul !== 1 && state.data.player && !state.data.player.isHiding) {
+      // applied implicitly via reduced effective movement if needed — stash
+      state.data.player._weatherSpeed = spdMul;
+    }
+
+    // World atmosphere director (unseen props only)
+    if (!worldDirector && renderer?.scene) {
+      worldDirector = new WorldDirector(pacing, renderer.scene);
+    }
+    if (worldDirector && renderer?.camera) {
+      worldDirector.update(dt, now, renderer.camera, state.data.player.sanity ?? 100);
+    }
+
+    // Hallucinations (audio/visual only — never real AI stimuli)
+    if (!hallu && audio && renderer) {
+      hallu = new HallucinationDirector(audio, renderer);
+    }
+    if (hallu) {
+      hallu.update(dt, sanity.lastTier, state.data.player, renderer?.camera);
+    }
+
+
+    // --- Pickups (solo local / multi host-authoritative) ---
+    (function tickPickups() {
+      const pickups = state.data.pickups || {};
+      const pp = state.data.player.position;
+      const near = (pk, x, z, r) => Math.hypot(pk.x - x, pk.z - z) < r;
+      if (mode === 'solo' || room?.isHost) {
+        let dirty = false;
+        for (const pk of Object.values(pickups)) {
+          if (pk.taken || !near(pk, pp.x, pp.z, 1.8)) continue;
+          pk.taken = true;
+          pk.takenBy = room?.uid || 'local';
+          givePickupItem(pk);
+          dirty = true;
+        }
+        if (room?.isHost) {
+          for (const [uid, c] of Object.entries(room.remoteClaims || {})) {
+            const pk = pickups[c.pickupId];
+            const rp = room.remotePlayers[uid];
+            if (!pk || pk.taken || !rp || !near(pk, rp.x, rp.z, 3)) continue;
+            pk.taken = true;
+            pk.takenBy = uid;
+            dirty = true;
+          }
+          if (dirty) room.writePickups(pickups);
+        }
+      } else if (room) {
+        const t = performance.now();
+        for (const [id, pk] of Object.entries(room.remotePickups || {})) {
+          if (!pk.taken && near(pk, pp.x, pp.z, 1.8) && t - (claimedPickups.get(id) || 0) > 2000) {
+            claimedPickups.set(id, t);
+            room.claimPickup(id);
+          }
+          if (pk.taken && pk.takenBy === room.uid && !appliedPickups.has(id)) {
+            appliedPickups.add(id);
+            givePickupItem(pk);
+          }
+          if (state.data.pickups[id]) state.data.pickups[id].taken = !!pk.taken;
+        }
+      }
+    })();
+
+    // Sanity filter strength
+    if (audio?.setSanityFilter) {
+      const s = state.data.player.sanity ?? 100;
+      audio.setSanityFilter(Math.pow(1 - s / 100, 2));
+    }
+
+    // Duck ambience shortly before monster enters 25 m
+    if (audio?.duckAmbience && monsters?.length) {
+      let near = Infinity;
+      for (const m of state.data.monsters) {
+        if (!m.active && m.active !== undefined) continue;
+        const d = Math.hypot(
+          m.position.x - state.data.player.position.x,
+          m.position.z - state.data.player.position.z
+        );
+        if (d < near) near = d;
+      }
+      if (near < 28 && near > 22 && !state._duckedNear) {
+        state._duckedNear = true;
+        audio.duckAmbience(4);
+      }
+      if (near > 35) state._duckedNear = false;
     }
 
     // Revive hold E
@@ -1029,7 +1259,7 @@ function startLoop() {
         if (d < 2.4) { nearDowned = uid; break; }
       }
       const bar = document.getElementById('revive-bar');
-      if (nearDowned && (player.keys.has('KeyE') || player._reviveHold)) {
+      if (nearDowned && (player.keys.has(binds.interact) || player._reviveHold)) {
         player._reviveAcc = (player._reviveAcc || 0) + dt;
         if (bar) {
           bar.classList.remove('hidden');

@@ -8,11 +8,11 @@ export function nearestMonsterDist(playerPos, monsters) {
   const pz = playerPos.z;
   for (let i = 0; i < monsters.length; i++) {
     const m = monsters[i];
+    if (m.active === false) continue;
     const dx = m.position.x - px;
     const dz = m.position.z - pz;
     const d2 = dx * dx + dz * dz;
     if (d2 < best * best) {
-      // only sqrt when potentially closer
       const d = Math.sqrt(d2);
       if (d < best) {
         best = d;
@@ -25,7 +25,6 @@ export function nearestMonsterDist(playerPos, monsters) {
 
 /** Map distance → heart BPM and danger 0..1 */
 export function heartFromDistance(dist) {
-  // calm 70 BPM far away; up to ~160 when on top of player
   if (!Number.isFinite(dist) || dist > 25) {
     return { bpm: 70, danger: 0, near: false };
   }

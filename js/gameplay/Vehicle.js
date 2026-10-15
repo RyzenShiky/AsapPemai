@@ -18,6 +18,20 @@ function distXZ(a, b) {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
+/** GLB forward = +Z, game forward movement = -Z */
+export const VEHICLE_FACE = Math.PI;
+
+export function seatToWorld(v, s) {
+  const a = v.rotation.yaw + VEHICLE_FACE;
+  const c = Math.cos(a);
+  const n = Math.sin(a);
+  return {
+    x: v.position.x + s.x * c + s.z * n,
+    y: (v.position.y || 0) + s.y,
+    z: v.position.z - s.x * n + s.z * c,
+  };
+}
+
 export class VehicleController {
   constructor(type, position, id = null) {
     this.id = id || `v_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -74,14 +88,7 @@ export class VehicleController {
 
   worldSeatPosition(role, passengerIndex = 0) {
     const key = this.seatNameForRole(role, passengerIndex);
-    const local = this.seatOffsets[key] || { x: 0, y: 1, z: 0 };
-    const cos = Math.cos(this.rotation.yaw);
-    const sin = Math.sin(this.rotation.yaw);
-    return {
-      x: this.position.x + (local.x * cos - local.z * sin),
-      y: this.position.y + local.y,
-      z: this.position.z + (local.x * sin + local.z * cos),
-    };
+    return seatToWorld(this, this.seatOffsets[key] || { x: 0, y: 1, z: 0 });
   }
 
   /**
@@ -130,13 +137,15 @@ export class VehicleController {
       if (audio?.playCrashThud) audio.playCrashThud(pushed);
     }
 
-    // Engine noise proportional to speed — feeds sound AI
-    if (Math.abs(this.speed) > 1.5) {
+    // Engine noise ~4×/s (not every frame) so suspicion stays fair
+    this._engAcc = (this._engAcc || 0) + dt;
+    if (Math.abs(this.speed) > 1.5 && this._engAcc >= 0.25) {
+      this._engAcc = 0;
       const intens = Math.min(1, Math.abs(this.speed) / maxSpd);
       state.emitSound({
         position: { ...this.position },
         intensity: 0.35 + intens * 0.55,
-        radius: 55 + intens * 30,
+        radius: 35 + intens * 25,
         type: 'engine',
       });
     }
@@ -162,7 +171,7 @@ export class VehicleController {
 }
 
 export function findDismountSpot(vehicle, colliders, playerRadius = 0.4) {
-  const tryAngles = [90, -90, 135, -135, 180, 45, -45];
+  const tryAngles = [90, -90, 135, -135, 0, 45, -45];
   const dismountRadius = vehicle.type === 'mobil' ? 2.4 : 1.4;
   for (const deg of tryAngles) {
     const a = vehicle.rotation.yaw + (deg * Math.PI) / 180;

@@ -2,13 +2,15 @@
  * PATROL --sound/suspicion--> INVESTIGATE --timeout--> SEARCH --timeout--> PATROL
  * Ghost investigate: false alarm near player (dread, no attack window)
  * STUNNED: vehicle knock-down
- * Any state --suspicion high + recent sound--> CHASE
- * CHASE --lost (low suspicion)--> SEARCH
+ * Any state --canSee + suspicion--> CHASE
+ * CHASE --lost--> LOST_TARGET --timeout--> SEARCH
+ * SEARCH --repeated player route--> AMBUSH
  */
 export function updateMonsterState(current, ctx) {
   const hasRecentSound = ctx.recentSounds.length > 0;
   const timeSinceHeard = ctx.now - (ctx.memory.lastHeardTime || 0);
   const sus = ctx.memory.suspicion;
+  const canSee = !!ctx.canSee;
 
   if (current === 'STUNNED') {
     if (ctx.now < (ctx.monster?.stunnedUntil || 0)) return 'STUNNED';
@@ -16,7 +18,8 @@ export function updateMonsterState(current, ctx) {
   }
 
   // Enter CHASE from any non-chase state (not during pure ghost investigate)
-  if (current !== 'CHASE' && !ctx.memory._ghostInvestigate) {
+  if (current !== 'CHASE' && current !== 'LOST_TARGET' && !ctx.memory._ghostInvestigate) {
+    if (canSee && sus > 20) return 'CHASE';
     if (sus >= 70 && (hasRecentSound || timeSinceHeard < 4)) {
       return 'CHASE';
     }
@@ -72,13 +75,34 @@ export function updateMonsterState(current, ctx) {
 
     case 'SEARCH':
       if (hasRecentSound) return 'INVESTIGATE';
+      // Ambush: player keeps using the same route/spot
+      if (ctx.memory.routeRepeats >= 3 && ctx.distToPlayer < 25) {
+        ctx.memory.ambushUntil = ctx.now + 12 + Math.random() * 8;
+        ctx.memory.routeRepeats = 0;
+        return 'AMBUSH';
+      }
       if (timeSinceHeard > ctx.searchTimeout) return 'PATROL';
       return 'SEARCH';
 
     case 'CHASE':
-      if (sus < 30 && timeSinceHeard > 5) return 'SEARCH';
+      // Lost target → go to last known + extrapolated heading
+      if (sus < 30 && timeSinceHeard > 5 && !canSee) {
+        ctx.memory.lostAt = ctx.now;
+        return 'LOST_TARGET';
+      }
       if (sus < 15) return 'PATROL';
       return 'CHASE';
+
+    case 'LOST_TARGET':
+      // Head toward last seen / last heard position, not live player
+      if (hasRecentSound) return 'INVESTIGATE';
+      if (canSee && sus > 20) return 'CHASE';
+      return ctx.now - (ctx.memory.lostAt || 0) > 6 ? 'SEARCH' : current;
+
+    case 'AMBUSH':
+      if (ctx.distToPlayer < 12 && canSee) return 'CHASE';
+      if (ctx.now > (ctx.memory.ambushUntil || 0)) return 'SEARCH';
+      return current;
 
     default:
       return 'PATROL';

@@ -40,10 +40,18 @@ export class AudioManager {
     l.upY.setValueAtTime(1, t);
   }
 
-  playFootstep(x, y, z, intensity = 1) {
+  playFootstep(x, y, z, intensity = 1, mat = 'grass') {
     if (!this.ctx || !this.sfx) return;
+    const MAT = {
+      grass:    { f: 900,  g: 0.5 },
+      gravel:   { f: 2500, g: 1.0 },
+      wood:     { f: 600,  g: 0.9 },
+      concrete: { f: 1500, g: 0.8 },
+    };
+    const m = MAT[mat] || MAT.grass;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
+    const lowpass = this.ctx.createBiquadFilter();
     const panner = this.ctx.createPanner();
     panner.panningModel = 'HRTF';
     panner.distanceModel = 'inverse';
@@ -52,16 +60,30 @@ export class AudioManager {
     panner.rolloffFactor = 1.2;
     osc.type = 'triangle';
     osc.frequency.value = 80 + Math.random() * 40;
-    gain.gain.setValueAtTime(0.12 * intensity, this.ctx.currentTime);
+    lowpass.type = 'lowpass';
+    lowpass.frequency.value = m.f;
+    const g = 0.12 * intensity * m.g;
+    gain.gain.setValueAtTime(g, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.12);
     panner.positionX.value = x;
     panner.positionY.value = y;
     panner.positionZ.value = z;
     osc.connect(gain);
-    gain.connect(panner);
+    gain.connect(lowpass);
+    lowpass.connect(panner);
     panner.connect(this.sfx);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.13);
+  }
+
+  /** Briefly duck ambience (e.g. before monster approaches). */
+  duckAmbience(sec = 4) {
+    if (!this.ambience || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.ambience.gain.setTargetAtTime(0.05, t, 0.3);
+    setTimeout(() => {
+      if (this.ambience) this.ambience.gain.setTargetAtTime(1, this.ctx.currentTime, 2);
+    }, sec * 1000);
   }
 
   setRain(on) {
@@ -155,7 +177,7 @@ export class AudioManager {
     osc.stop(t0 + 0.6);
   }
 
-  playWhisper(intensity = 0.3) {
+  playWhisper(intensity = 0.3, x = null, y = null, z = null) {
     if (!this.ctx || !this.sfx) return;
     const t0 = this.ctx.currentTime;
     const bufSize = Math.floor(this.ctx.sampleRate * 1.2);
@@ -174,7 +196,21 @@ export class AudioManager {
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.1);
     src.connect(bp);
     bp.connect(g);
-    g.connect(this.sfx);
+    if (x != null) {
+      const panner = this.ctx.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = 1;
+      panner.maxDistance = 40;
+      panner.rolloffFactor = 1.1;
+      panner.positionX.value = x;
+      panner.positionY.value = y ?? 1.5;
+      panner.positionZ.value = z ?? 0;
+      g.connect(panner);
+      panner.connect(this.sfx);
+    } else {
+      g.connect(this.sfx);
+    }
     src.start(t0);
     src.stop(t0 + 1.2);
   }
@@ -259,4 +295,31 @@ export class AudioManager {
       console.warn('playPositionalFile', e);
     }
   }
+
+  playSiren(x, y, z, vol = 0.5) {
+    if (!this.ctx || !this.sfx) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    const panner = this.ctx.createPanner();
+    panner.panningModel = 'HRTF';
+    panner.refDistance = 12;
+    panner.maxDistance = 300;
+    panner.positionX.value = x;
+    panner.positionY.value = (y || 0) + 8;
+    panner.positionZ.value = z;
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(260, t);
+    o.frequency.linearRampToValueAtTime(820, t + 2.2);
+    o.frequency.linearRampToValueAtTime(300, t + 4.5);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.4);
+    g.gain.linearRampToValueAtTime(0, t + 4.5);
+    o.connect(g);
+    g.connect(panner);
+    panner.connect(this.sfx);
+    o.start(t);
+    o.stop(t + 4.6);
+  }
+
 }

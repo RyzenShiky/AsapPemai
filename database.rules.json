@@ -3,6 +3,7 @@
     ".read": false,
     ".write": false,
     "rooms": {
+      ".indexOn": ["meta/createdAt"],
       "$roomCode": {
         ".read": "auth != null",
         "meta": {
@@ -15,12 +16,17 @@
         },
         "players": {
           "$uid": {
-            ".write": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && ((auth.uid === $uid && (data.exists() || root.child('rooms/' + $roomCode + '/players').numChildren() < 6)) || (data.exists() && root.child('rooms/' + $roomCode + '/meta/hostUid').val() === auth.uid))",
             ".validate": "newData.hasChildren(['x', 'y', 'z', 'yaw', 'alive', 'health'])",
             "x": { ".validate": "newData.isNumber() && newData.val() > -300 && newData.val() < 300" },
+            "y": { ".validate": "newData.isNumber() && newData.val() > -50 && newData.val() < 200" },
             "z": { ".validate": "newData.isNumber() && newData.val() > -300 && newData.val() < 300" },
+            "yaw": { ".validate": "newData.isNumber()" },
+            "alive": { ".validate": "newData.isBoolean()" },
+            "isDowned": { ".validate": "newData.isBoolean()" },
             "health": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
-            "name": { ".validate": "newData.isString() && newData.val().length <= 16" }
+            "name": { ".validate": "newData.isString() && newData.val().length <= 16" },
+            "$other": { ".validate": "$other.matches(/^(footY|moveState|downedTimer|ridingVehicleId|ridingRole|joinedAt)$/) && (newData.isNumber() || newData.isString() && newData.val().length < 40 || newData.isBoolean())" }
           }
         },
         "soundEvents": {
@@ -31,15 +37,44 @@
         },
         "monster": {
           ".write": "auth != null && root.child('rooms/' + $roomCode + '/meta/hostUid').val() === auth.uid",
-          "$mid": { ".validate": "newData.hasChildren(['x', 'y', 'z', 'yaw', 'aiState'])" }
+          "$mid": {
+            ".validate": "newData.hasChildren(['x', 'y', 'z', 'yaw', 'aiState'])",
+            "active": { ".validate": "newData.isBoolean()" },
+            "type": { ".validate": "newData.isString()" }
+          }
         },
         "vehicles": {
-          ".write": "auth != null && root.child('rooms/' + $roomCode + '/meta/hostUid').val() === auth.uid",
-          "$vid": { ".validate": "newData.hasChildren(['type', 'x', 'z', 'yaw'])" }
+          "$vid": {
+            ".write": "auth != null && (root.child('rooms/' + $roomCode + '/meta/hostUid').val() === auth.uid || !data.child('driver').exists() || data.child('driver').val() === auth.uid)",
+            ".validate": "newData.hasChildren(['type', 'x', 'z', 'yaw'])"
+          }
         },
         "game": {
           ".write": "auth != null && root.child('rooms/' + $roomCode + '/meta/hostUid').val() === auth.uid",
-          ".validate": "newData.hasChildren(['gameOver', 'win'])"
+          ".validate": "newData.hasChildren(['gameOver', 'win'])",
+          "weather": { ".validate": "newData.isString()" },
+          "gameOver": { ".validate": "newData.isBoolean()" },
+          "win": { ".validate": "newData.isBoolean()" },
+          "t0": { ".validate": "newData.isNumber()" }
+        },
+        "pickups": {
+          ".write": "auth != null && root.child('rooms/' + $roomCode + '/meta/hostUid').val() === auth.uid",
+          "$pid": {
+            ".validate": "newData.hasChildren(['type', 'x', 'z', 'taken']) || newData.child('taken').isBoolean()",
+            "type": { ".validate": "newData.isString()" },
+            "x": { ".validate": "newData.isNumber()" },
+            "z": { ".validate": "newData.isNumber()" },
+            "taken": { ".validate": "newData.isBoolean()" },
+            "takenBy": { ".validate": "newData.isString()" }
+          }
+        },
+        "pickupClaims": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.hasChildren(['pickupId', 't'])",
+            "pickupId": { ".validate": "newData.isString()" },
+            "t": { ".validate": "newData.isNumber()" }
+          }
         },
         "billboard": {
           ".write": "auth != null && root.child('rooms/' + $roomCode + '/meta/hostUid').val() === auth.uid",

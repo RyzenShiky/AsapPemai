@@ -2,6 +2,10 @@ import { MonsterPerception } from '../ai/Perception.js';
 import { pickSearchTarget } from '../ai/StateMachine.js';
 import { clampToWorld, WORLD } from '../core/WorldConfig.js';
 import { resolveCollisions, groundHeight } from '../core/Collision.js';
+import { canSee, openness } from '../ai/Vision.js';
+import { findPath } from '../ai/Pathfinding.js';
+import { inspectSpot } from './HideSpots.js';
+import { MONSTER_TYPES, ROSTER } from '../core/MonsterTypes.js';
 
 function distXZ(a, b) {
   return Math.hypot(a.x - b.x, a.z - b.z);
@@ -18,20 +22,28 @@ const PATROL_ANCHORS = [
 ];
 
 export class MonsterController {
-  constructor(state, index = 0, colliders = [], room = null) {
+  constructor(state, index = 0, colliders = [], room = null, wallsOnly = null) {
     this.state = state;
     this.index = index;
-    this.colliders = colliders;
+    this.cfg = MONSTER_TYPES[ROSTER[index]] || MONSTER_TYPES.shadow;
+    // Siren ignores trees but still blocked by walls
+    this.colliders = this.cfg.ignoresTrees && wallsOnly ? wallsOnly : colliders;
     this.room = room;
     this.perception = new MonsterPerception();
     this.target = null;
-    this.moveSpeed = 2.5;
+    this.moveSpeed = this.cfg.speed;
     this.attackCooldown = 0;
     this.anchorIdx = index % PATROL_ANCHORS.length;
     this.patrolAnchors = PATROL_ANCHORS.map((a, i) => ({
       x: a.x + ((index * 37 + i * 13) % 40) - 20,
       z: a.z + ((index * 29 + i * 17) % 40) - 20,
     }));
+    this._visionAcc = 0;
+    this._stuck = 0;
+    this._lastPos = null;
+    this._path = null;
+    this._pathIdx = 0;
+    this._pathAcc = 0;
   }
 
   setRoom(room) {
@@ -46,27 +58,57 @@ export class MonsterController {
 
   update(dt, now) {
     const m = this.state.data.monsters[this.index];
-    if (!m || m.active === false) return;
+    if (!m || m.active === false) return; // night schedule
     this.attackCooldown = Math.max(0, this.attackCooldown - dt);
     m.attackCooldown = this.attackCooldown;
 
     const events = this.state.data.world.activeSoundEvents.filter((e) => now - e.timestamp < 2.5);
-    const weatherMul = this.state.data.world.weather === 'rain' ? 0.55 : 1;
+    // weatherMul floor 0.6 so rain never fully silences the player
+    const weatherMul =
+      this.state.data.world.weather === 'rain'
+        ? 0.7
+        : this.state.data.world.weather === 'storm'
+          ? 0.55
+          : 1;
+    const weatherMulClamped = Math.max(0.6, weatherMul) * (this.state._hearingMask ?? 1) * (this.cfg.hearMul ?? 1);
+
     const ppos = this.state.data.player.position;
     const distP = Math.hypot(m.position.x - ppos.x, m.position.z - ppos.z);
-    this.perception.update(m, events, now, dt, weatherMul, {
+
+    // Vision check ~5×/sec
+    this._visionAcc += dt;
+    if (this._visionAcc >= 0.2) {
+      this._visionAcc = 0;
+      const light =
+        this.state.data.world.weather === 'fog'
+          ? 0.45
+          : this.state.data.world.weather === 'rain'
+            ? 0.8
+            : 1;
+      const range = this.state.data.player.isHiding ? 7 : 28;
+      const lampSites = this.state._lampSites || null;
+      m.memory.canSeePlayer = canSee(m, ppos, this.colliders, { light, range, lampSites });
+      if (m.memory.canSeePlayer) {
+        m.memory.lastSeenPosition = { x: ppos.x, y: ppos.y, z: ppos.z };
+        m.memory.lastSeenTime = now;
+      }
+    }
+
+    this.perception.update(m, events, now, dt, weatherMulClamped, {
       playerPos: ppos,
       distToPlayer: distP,
       pacingOk: this._pacingOk !== false,
       onGhostEvent: this._onGhostEvent,
+      canSee: m.memory.canSeePlayer,
     });
 
     const frenzy = this._frenzyMul(m);
     const base = this.moveSpeed;
+    const prevX = m.position.x;
+    const prevZ = m.position.z;
 
     switch (m.aiState) {
       case 'STUNNED':
-        // frozen until StateMachine clears
         break;
       case 'PATROL':
         this.widePatrol(m, dt, base * 0.8 * Math.min(1.2, frenzy));
@@ -82,18 +124,48 @@ export class MonsterController {
         }
         if (this.target) this.moveToward(m, this.target, dt, base * frenzy);
         break;
-      case 'CHASE':
-        if (m.memory.lastHeardPosition) {
-          this.moveToward(m, m.memory.lastHeardPosition, dt, base * 2.0 * frenzy);
+      case 'CHASE': {
+        // Prefer live sight, else last seen, else last heard
+        const t = m.memory.canSeePlayer
+          ? ppos
+          : m.memory.lastSeenPosition ?? m.memory.lastHeardPosition;
+        if (t) this.moveToward(m, t, dt, base * 2.0 * frenzy);
+        break;
+      }
+      case 'LOST_TARGET': {
+        // Extrapolate from last seen position (not live player)
+        const t = m.memory.lastSeenPosition ?? m.memory.lastHeardPosition;
+        if (t) this.moveToward(m, t, dt, base * 1.6 * frenzy);
+        break;
+      }
+      case 'AMBUSH':
+        // Stay still / slow until player is close enough
+        if (distP < 14) {
+          this.moveToward(m, ppos, dt, base * 1.8 * frenzy);
         }
         break;
     }
 
-    resolveCollisions(m.position, 0.55, this.colliders);
+    // Stuck watchdog
+    const moved = Math.hypot(m.position.x - prevX, m.position.z - prevZ);
+    const expected = base * dt * 0.3;
+    if (this.target && moved < expected) this._stuck += dt;
+    else this._stuck = 0;
+    if (this._stuck > 2) {
+      this.target = null;
+      this.anchorIdx = (this.anchorIdx + 1) % this.patrolAnchors.length;
+      this._stuck = 0;
+    }
+
+    resolveCollisions(m.position, this.cfg.radius, this.colliders);
     const c = clampToWorld(m.position.x, m.position.z);
     m.position.x = c.x;
     m.position.z = c.z;
     m.position.y = groundHeight(m.position.x, m.position.z);
+    // Inspect nearby hide spots while searching
+    const localP = this.state.data.player;
+    if (localP?.isHiding) this.tryInspectHide(m, localP);
+
     this._tryAttack(m);
     this._sepFromPeers(m, dt);
 
@@ -130,7 +202,10 @@ export class MonsterController {
     if (m.memory && m.memory._ghostInvestigate) return;
     if (this.attackCooldown > 0) return;
     const canAttack =
-      m.aiState === 'CHASE' || m.aiState === 'INVESTIGATE' || (m.memory.suspicion || 0) > 40;
+      m.aiState === 'CHASE' ||
+      m.aiState === 'LOST_TARGET' ||
+      m.aiState === 'INVESTIGATE' ||
+      (m.memory.suspicion || 0) > 40;
     if (!canAttack) return;
     const targets = [];
     const local = this.state.data.player;
@@ -139,12 +214,13 @@ export class MonsterController {
         pos: local.position,
         apply: (dmg) => {
           if (local.isDowned) {
-            // finishing blow
             local.alive = false;
             local.isDowned = false;
             this.state.data.progress.deaths += 1;
-            this.state.data.progress.gameOver = true;
-            this.state.data.progress.win = false;
+            if (!this.room) {
+              this.state.data.progress.gameOver = true;
+              this.state.data.progress.win = false;
+            }
           } else {
             local.health = Math.max(0, local.health - dmg);
             if (local.health <= 0) {
@@ -167,8 +243,12 @@ export class MonsterController {
       }
     }
     for (const t of targets) {
-      if (distXZ(m.position, t.pos) < 1.6) {
-        t.apply(34);
+      // Require open line (no thin-wall punches)
+      if (
+        distXZ(m.position, t.pos) < this.cfg.reach &&
+        openness(this.colliders, m.position, t.pos) > 0
+      ) {
+        t.apply(this.cfg.dmg);
         this.attackCooldown = 1.2;
         this.state.emitSound({
           position: { ...m.position },
@@ -182,12 +262,46 @@ export class MonsterController {
   }
 
   moveToward(m, target, dt, speed) {
-    const dx = target.x - m.position.x;
-    const dz = target.z - m.position.z;
+    // Refresh local A* path every ~0.8 s when chasing/searching
+    this._pathAcc = (this._pathAcc || 0) + dt;
+    if (this._pathAcc > 0.8 || !this._path || this._pathIdx >= (this._path?.length || 0)) {
+      this._pathAcc = 0;
+      this._path = findPath(this.colliders, m.position, target) || null;
+      this._pathIdx = 0;
+    }
+    let aim = target;
+    if (this._path && this._pathIdx < this._path.length) {
+      aim = this._path[this._pathIdx];
+      if (Math.hypot(aim.x - m.position.x, aim.z - m.position.z) < 2.2) {
+        this._pathIdx++;
+        if (this._pathIdx < this._path.length) aim = this._path[this._pathIdx];
+      }
+    }
+    const dx = aim.x - m.position.x;
+    const dz = aim.z - m.position.z;
     const d = Math.hypot(dx, dz) || 1;
     m.position.x += (dx / d) * speed * dt;
     m.position.z += (dz / d) * speed * dt;
     m.rotation.yaw = Math.atan2(-dx, -dz);
+  }
+
+  /** Called when SEARCH is near a player who is hiding. */
+  tryInspectHide(m, p) {
+    if (!p.isHiding || !p.hideSpot) return false;
+    const d = Math.hypot(m.position.x - p.hideSpot.x, m.position.z - p.hideSpot.z);
+    if (d > 3) return false;
+    if (m.aiState !== 'SEARCH' && m.aiState !== 'INVESTIGATE') return false;
+    const found = inspectSpot(m, p.hideSpot, p);
+    if (found) {
+      p.isHiding = false;
+      p.hideSpot = null;
+      p.isHoldingBreath = false;
+      m.memory.suspicion = Math.max(m.memory.suspicion || 0, 80);
+      m.memory.canSeePlayer = true;
+      m.memory.lastSeenPosition = { ...p.position };
+      return true;
+    }
+    return false;
   }
 
   widePatrol(m, dt, speed) {

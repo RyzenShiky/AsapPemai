@@ -1,10 +1,14 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js';
 import {
-  getDatabase, ref, set, update, onValue, onDisconnect, get, push, remove,
+  getDatabase, ref, set, update, onValue, onDisconnect, get, remove,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js';
 import {
   getStorage, ref as sRef, uploadBytes, getDownloadURL,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-storage.js';
+import {
+  getAuth, signInAnonymously,
+} from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js';
+import { MAX_PLAYERS, ROSTER } from '../core/MonsterTypes.js';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyC5T3AoTWf6qn67JGMltq-j349oMAcqH9w',
@@ -19,6 +23,9 @@ const firebaseConfig = {
 
 let app, db;
 
+const withTimeout = (p, ms) =>
+  Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error('auth-timeout')), ms))]);
+
 export function initFirebase() {
   if (db) return db;
   app = initializeApp(firebaseConfig);
@@ -30,20 +37,38 @@ export function getDb() {
   return initFirebase();
 }
 
+export function getAppInstance() {
+  if (!app) initFirebase();
+  return app;
+}
+
+/** Wait for Firebase Auth; sign in anonymously if needed. Returns auth.uid. */
+export async function ensureAuthUid(ms = 12000) {
+  initFirebase();
+  const auth = getAuth(app);
+  await withTimeout(auth.authStateReady(), ms);
+  if (!auth.currentUser) await withTimeout(signInAnonymously(auth), ms);
+  return auth.currentUser.uid;
+}
+
 export function getStorageRef() {
   if (!app) initFirebase();
   return getStorage(app);
 }
 
 export async function uploadBillboardMedia(file, roomCode) {
+  if (file.size > 8 * 1024 * 1024) throw new Error('File terlalu besar (maks 8 MB)');
+  const ok = /^(image\/|video\/mp4|audio\/mpeg)/.test(file.type || '');
+  if (!ok) throw new Error('Tipe file tidak diizinkan');
   const storage = getStorageRef();
   const safe = (file.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `billboard/${roomCode || 'solo'}/${Date.now()}_${safe}`;
   const fileRef = sRef(storage, path);
-  await uploadBytes(fileRef, file);
+  await uploadBytes(fileRef, file, { contentType: file.type });
   return getDownloadURL(fileRef);
 }
 
+/** Local-only fallback id (solo / offline). Prefer ensureAuthUid for multiplayer. */
 export function deviceUid() {
   let id = localStorage.getItem('longway_uid');
   if (!id) {
@@ -53,33 +78,45 @@ export function deviceUid() {
   return id;
 }
 
+/** 6-char room code without ambiguous characters. */
 export function roomCode() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from(crypto.getRandomValues(new Uint8Array(6)), (x) => A[x % A.length]).join('');
 }
 
 /**
- * Host-authority multiplayer.
- * /rooms/{code}/meta { hostUid, createdAt, started }
- * /rooms/{code}/players/{uid}
- * /rooms/{code}/monster/{id}
- * /rooms/{code}/soundEvents
- * /rooms/{code}/game
+ * Host-authority multiplayer with driver-writable vehicles and claim pickups.
  */
 export class MultiplayerRoom {
   constructor(code, isHost) {
     this.code = code;
-    this.uid = deviceUid();
-    this.isHost = !!isHost;
     this.db = getDb();
+    const auth = getAuth(app);
+    this.uid = auth.currentUser?.uid;
+    if (!this.uid) throw new Error('Belum terhubung ke server. Coba login ulang.');
+    this.isHost = !!isHost;
     this.unsubs = [];
     this.remotePlayers = {};
     this.remoteMonsters = {};
     this.remoteSounds = [];
     this.remoteVehicles = {};
+    this.remotePickups = {};
+    this.remoteClaims = {};
     this.remoteBillboard = null;
     this.gameStatus = { gameOver: false, win: false };
     this.meta = { hostUid: null, started: false };
     this.onUpdate = null;
+    this.skew = 0;
+    this.t0 = null;
+    try {
+      onValue(ref(this.db, '.info/serverTimeOffset'), (s) => {
+        this.skew = s.val() || 0;
+      });
+    } catch (e) { /* */ }
+  }
+
+  serverNow() {
+    return Date.now() + (this.skew || 0);
   }
 
   async create() {
@@ -101,13 +138,9 @@ export class MultiplayerRoom {
     this.meta = meta;
     this.isHost = meta.hostUid === this.uid;
 
-    // Host migration if previous host left
-    if (!meta.hostUid) {
-      await this.claimHost();
-    }
+    if (!meta.hostUid) await this.claimHost();
 
     await this._joinPlayer();
-    // AFTER isHost is final — register disconnect cleanup
     this._setupDisconnect();
     this._listen();
   }
@@ -125,9 +158,15 @@ export class MultiplayerRoom {
   }
 
   async _joinPlayer() {
+    const ps = (await get(ref(this.db, `rooms/${this.code}/players`))).val() || {};
+    if (!ps[this.uid] && Object.keys(ps).length >= MAX_PLAYERS) {
+      throw new Error('Room penuh (maks. 6 pemain)');
+    }
     const pref = ref(this.db, `rooms/${this.code}/players/${this.uid}`);
     await set(pref, {
-      x: 0, y: 1.7, z: 8 + Math.random() * 2,
+      x: 0,
+      y: 1.7,
+      z: 8 + Math.random() * 2,
       yaw: 0,
       alive: true,
       health: 100,
@@ -141,7 +180,6 @@ export class MultiplayerRoom {
     onDisconnect(pref).remove();
     if (this.isHost) {
       onDisconnect(ref(this.db, `rooms/${this.code}/meta/hostUid`)).set(null);
-      // also reset started if host leaves before game? keep started true mid-game
     }
   }
 
@@ -154,13 +192,14 @@ export class MultiplayerRoom {
       this.remoteSounds = v.soundEvents ? Object.values(v.soundEvents) : [];
       this.gameStatus = v.game || { gameOver: false, win: false };
       this.remoteVehicles = v.vehicles || {};
+      this.remotePickups = v.pickups || {};
+      this.remoteClaims = v.pickupClaims || {};
       this.remoteBillboard = v.billboard || null;
       this.meta = v.meta || { hostUid: null, started: false };
 
       if (this.meta.hostUid === this.uid) this.isHost = true;
       else if (this.meta.hostUid) this.isHost = false;
 
-      // Host migration: no host → earliest joiner claims
       if (!this.meta.hostUid) {
         const players = Object.entries(this.remotePlayers).sort(
           (a, b) => (a[1].joinedAt || 0) - (b[1].joinedAt || 0)
@@ -175,29 +214,34 @@ export class MultiplayerRoom {
     this.unsubs.push(() => unsub());
   }
 
+  /** Client-owned fields only; host also writes own health/alive. Uses update() so host damage is not clobbered. */
   writePlayer(player) {
     const prev = this.remotePlayers[this.uid] || {};
     const eyeY = player.position.y;
-    const footY = eyeY - 1.7; // Player.position.y is eye height
-    return set(ref(this.db, `rooms/${this.code}/players/${this.uid}`), {
+    const footY = eyeY - 1.7;
+    const own = {
       x: player.position.x,
       y: eyeY,
       footY,
       z: player.position.z,
       yaw: player.rotation.yaw,
-      alive: player.alive !== false,
-      health: player.health ?? 100,
       moveState: player.moveState || 'idle',
-      isDowned: !!player.isDowned,
-      downedTimer: player.downedTimer || 0,
       ridingVehicleId: player.ridingVehicleId || null,
       ridingRole: player.ridingRole || null,
-      name: prev.name || ('Player_' + this.uid.slice(-4)),
+      name: prev.name || 'Player_' + this.uid.slice(-4),
       joinedAt: prev.joinedAt || Date.now(),
-    });
+    };
+    if (this.isHost) {
+      Object.assign(own, {
+        alive: player.alive !== false,
+        health: player.health ?? 100,
+        isDowned: !!player.isDowned,
+        downedTimer: player.downedTimer || 0,
+      });
+    }
+    return update(ref(this.db, `rooms/${this.code}/players/${this.uid}`), own);
   }
 
-  /** Host applies damage to any player uid */
   applyDamage(uid, amount) {
     if (!this.isHost) return Promise.resolve();
     const prev = this.remotePlayers[uid];
@@ -233,13 +277,14 @@ export class MultiplayerRoom {
         aiState: m.aiState,
         suspicion: m.memory?.suspicion || 0,
         attackCooldown: m.attackCooldown || 0,
+        active: m.active !== false,
+        type: ROSTER[i] || 'shadow',
       };
     });
     return set(ref(this.db, `rooms/${this.code}/monster`), payload);
   }
 
   writeSound(ev) {
-    // one slot per player — does not pile up forever in DB
     return set(ref(this.db, `rooms/${this.code}/soundEvents/${this.uid}`), {
       x: ev.position.x,
       y: ev.position.y || 0,
@@ -263,23 +308,26 @@ export class MultiplayerRoom {
     });
   }
 
-  
+  /** Per-vehicle write: driver or host (host won't overwrite another driver's vehicle). */
+  writeVehicle(v) {
+    const me = this.uid;
+    if (v.driverUid && v.driverUid !== me && !this.isHost) return Promise.resolve();
+    if (this.isHost && v.driverUid && v.driverUid !== me) return Promise.resolve();
+    return set(ref(this.db, `rooms/${this.code}/vehicles/${v.id}`), {
+      type: v.type,
+      x: v.position.x,
+      y: v.position.y || 0,
+      z: v.position.z,
+      yaw: v.rotation.yaw,
+      driver: v.driverUid || null,
+      passengers: v.passengerUids || [],
+      speed: v.speed || 0,
+    });
+  }
+
+  /** @deprecated prefer writeVehicle */
   writeVehicles(vehicles) {
-    if (!this.isHost) return Promise.resolve();
-    const payload = {};
-    for (const v of vehicles || []) {
-      payload[v.id] = {
-        type: v.type,
-        x: v.position.x,
-        y: v.position.y || 0,
-        z: v.position.z,
-        yaw: v.rotation.yaw,
-        driver: v.driverUid,
-        passengers: v.passengerUids || [],
-        speed: v.speed || 0,
-      };
-    }
-    return set(ref(this.db, `rooms/${this.code}/vehicles`), payload);
+    return Promise.all((vehicles || []).map((v) => this.writeVehicle(v)));
   }
 
   setBillboard(url, type) {
@@ -299,7 +347,25 @@ export class MultiplayerRoom {
       deaths: progress.deaths || 0,
     };
     if (weather) payload.weather = weather;
+    // Preserve existing t0 across host migration; optional ?t= for night testing
+    if (!this.gameStatus.t0 && !this.t0 && typeof location !== 'undefined') {
+      const q = parseFloat(new URLSearchParams(location.search).get('t') || '0');
+      if (q > 0) this.t0 = this.serverNow() - q * 180 * 1000;
+    }
+    payload.t0 = this.gameStatus.t0 || (this.t0 ??= this.serverNow());
     return set(ref(this.db, `rooms/${this.code}/game`), payload);
+  }
+
+  writePickups(pickups) {
+    if (!this.isHost) return Promise.resolve();
+    return set(ref(this.db, `rooms/${this.code}/pickups`), pickups || {});
+  }
+
+  claimPickup(pickupId) {
+    return set(ref(this.db, `rooms/${this.code}/pickupClaims/${this.uid}`), {
+      pickupId,
+      t: Date.now(),
+    });
   }
 
   async leave() {
@@ -308,14 +374,16 @@ export class MultiplayerRoom {
     try {
       await onDisconnect(ref(this.db, `${base}/players/${this.uid}`)).cancel();
       if (this.isHost) await onDisconnect(ref(this.db, `${base}/meta/hostUid`)).cancel();
-    } catch (e) { /* ignore */ }
+    } catch (e) { /* */ }
     await remove(ref(this.db, `${base}/players/${this.uid}`));
     if (this.isHost) await set(ref(this.db, `${base}/meta/hostUid`), null);
   }
 
   dispose() {
     this.unsubs.forEach((u) => {
-      try { u(); } catch (e) { /* */ }
+      try {
+        u();
+      } catch (e) { /* */ }
     });
     this.unsubs = [];
   }

@@ -8,7 +8,7 @@ export class MonsterPerception {
   }
 
   /**
-   * @param {object} extra optional: playerPos, distToPlayer, pacingOk, onGhostEvent, monster
+   * @param {object} extra optional: playerPos, distToPlayer, pacingOk, onGhostEvent, monster, canSee
    */
   update(monster, events, now, dt, weatherMul = 1, extra = {}) {
     this.suspicion.update(dt);
@@ -26,6 +26,7 @@ export class MonsterPerception {
       pacingOk: extra.pacingOk !== false,
       onGhostEvent: extra.onGhostEvent,
       monster,
+      canSee: !!extra.canSee,
     });
   }
 }

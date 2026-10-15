@@ -20,26 +20,30 @@ export function createInitialState() {
       downedTimer: 0,
       ridingVehicleId: null,
       ridingRole: null,
+      battery: 100,
+      medkits: 0,
     },
     vehicles: [],
-    monsters: [
-      {
-        id: 'm0',
-        position: { x: 0, y: 0, z: 0 }, // filled on spawn
-        active: false,
-        rotation: { yaw: Math.PI },
-        aiState: 'PATROL',
-        memory: {
-          lastHeardPosition: null,
-          lastHeardTime: 0,
-          lastHeardIntensity: 0,
-          confidence: 0,
-          suspicion: 0,
-          searchRadius: 12,
-        },
-        path: [],
+    monsters: [0, 1, 2, 3].map((i) => ({
+      id: 'm' + i,
+      position: { x: 0, y: 0, z: 0 },
+      active: false,
+      rotation: { yaw: Math.PI },
+      aiState: 'PATROL',
+      memory: {
+        lastHeardPosition: null,
+        lastHeardTime: 0,
+        lastHeardIntensity: 0,
+        lastSeenPosition: null,
+        lastSeenTime: 0,
+        canSeePlayer: false,
+        confidence: 0,
+        suspicion: 0,
+        searchRadius: 14,
+        routeRepeats: 0,
       },
-    ],
+      path: [],
+    })),
     world: {
       levelId: 'forest_200',
       timeOfDay: 0.55,
@@ -59,6 +63,15 @@ export function createInitialState() {
         cabinLight: { stage: 0 },
       },
     },
+    pickups: {
+      // guaranteed batteries per area + medkits
+      bat_a: { type: 'battery', x: 12, z: 20, taken: false },
+      bat_b: { type: 'battery', x: -45, z: -30, taken: false },
+      bat_c: { type: 'battery', x: 60, z: -55, taken: false },
+      med_a: { type: 'medkit', x: -10, z: 40, taken: false },
+    },
+    lore: { found: {}, flags: {}, choices: {} },
+    inventory: { slots: 4, items: [] },
     progress: {
       playTime: 0,
       deaths: 0,
@@ -68,11 +81,26 @@ export function createInitialState() {
       timeUp: false,
       daysReached: 0,
     },
-    version: 3,
+    version: 4,
   };
 }
 
-const SAVE_KEY = 'longway_save_v3';
+const SAVE_KEY = 'longway_save_v4';
+const LEGACY_KEY = 'longway_save_v3';
+
+const MIGRATIONS = {
+  3: (d) => ({
+    ...d,
+    lore: d.lore || { found: {}, flags: {}, choices: {} },
+    inventory: d.inventory || { slots: 4, items: [] },
+    player: {
+      ...d.player,
+      battery: d.player?.battery ?? 100,
+      medkits: d.player?.medkits ?? 0,
+    },
+    version: 4,
+  }),
+};
 
 export class GameState {
   constructor(initial) {
@@ -84,7 +112,9 @@ export class GameState {
   }
 
   static deserialize(json) {
-    return new GameState(JSON.parse(json));
+    let d = JSON.parse(json);
+    while (MIGRATIONS[d.version]) d = MIGRATIONS[d.version](d);
+    return new GameState(d);
   }
 
   saveLocal() {
@@ -96,9 +126,33 @@ export class GameState {
     }
   }
 
+  /** Checkpoint save under a separate key (used on objective complete). */
+  saveCheckpoint(key = 'longway_checkpoint') {
+    try {
+      localStorage.setItem(key, this.serialize());
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   static loadLocal() {
     try {
-      const raw = localStorage.getItem(SAVE_KEY);
+      let raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) {
+        // try legacy
+        raw = localStorage.getItem(LEGACY_KEY);
+      }
+      if (!raw) return null;
+      return GameState.deserialize(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  static loadCheckpoint(key = 'longway_checkpoint') {
+    try {
+      const raw = localStorage.getItem(key);
       if (!raw) return null;
       return GameState.deserialize(raw);
     } catch (e) {
@@ -107,11 +161,12 @@ export class GameState {
   }
 
   static hasSave() {
-    return !!localStorage.getItem(SAVE_KEY);
+    return !!localStorage.getItem(SAVE_KEY) || !!localStorage.getItem(LEGACY_KEY);
   }
 
   static clearSave() {
     localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(LEGACY_KEY);
   }
 
   getVehicle(id) {

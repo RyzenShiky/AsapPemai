@@ -1,26 +1,31 @@
-# LONGWAY — HTML5 + CSS Modular + JS + Firebase Multiplayer
+# LONGWAY
 
-## Fixes in this build
-1. **CHASE** — suspicion ≥ 70 + recent sound (or ≥ 90) enters CHASE
-2. **Win/Lose** — monster attacks at close range; die at 0 HP; survive 5 min to escape
-3. **Footsteps audible** — `playFootstep()` called with spatial HRTF
-4. **Collision** — trees & rocks block player/monster; ground height matches terrain
-5. **Continue** — localStorage save/load; Continue enabled when save exists
-6. **2 monsters** — both patrol/hunt independently
+3D multiplayer horror game in the browser (Three.js + Firebase).
 
-## Multiplayer (host authority)
-- Host runs `Monster.js` AI, writes `/rooms/{code}/monster`
-- All clients write own `/players/{uid}`
-- All clients listen & render
-- Host migration if host disconnects (`onDisconnect`)
+## Features
+- 4 night-only monsters (shadow, smily, boiled, siren)
+- Roads, street lamps (deterministic, no network sync)
+- Multiplayer up to 6 players, shared clock (`t0`)
+- Pickups, vehicles, hide spots, weather (rain/fog/storm)
 
-## Run
+## Auth
+Anonymous auth is **required** for multiplayer (rules gate on `auth.uid`).
+Enable Anonymous + Google in Firebase Console → Authentication.
+Add your hosting domain under Authorized domains.
+
+## Deploy rules
 ```bash
-python -m http.server 8080
+firebase deploy --only database
+firebase deploy --only storage
+# CORS for billboard media:
+gsutil cors set cors.json gs://longway-284bd.firebasestorage.app
 ```
 
-## Firebase Rules
-Publish `database.rules.json` in Firebase Console → Realtime Database → Rules.
+## Night test shortcut
+Open with `?t=0.78` to jump into night (host sets `t0` offset).
 
-## Controls
-WASD · Shift run · Ctrl/C crouch · click canvas for mouse
+## Cache
+`vercel.json` sets `no-cache` on JS/CSS/HTML so modules stay in sync after deploy.
+
+## Assets
+Prefer compressed GLBs (meshopt + webp). `monster.glb` removed (unused).

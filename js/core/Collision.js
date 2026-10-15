@@ -1,4 +1,4 @@
-import { WORLD, tileSeed } from './WorldConfig.js';
+import { WORLD, tileSeed, onRoad, distToRoad } from './WorldConfig.js';
 import { allBuildingColliders, nearBuilding } from './Buildings.js';
 
 const CELL = 20;
@@ -21,7 +21,7 @@ export function buildColliders() {
         const x = ox + (sx - 0.5) * (ts - 2);
         const z = oz + (sz - 0.5) * (ts - 2);
         if (Math.hypot(x, z) < 8) continue;
-        if (nearBuilding(x, z, 9)) continue;
+        if (nearBuilding(x, z, 9) || onRoad(x, z, 5)) continue;
         colliders.push({
           x, z, r: 0.35 * scale, type: 'tree',
           scale, rot: tileSeed(tx, tz, i * 5) * Math.PI * 2,
@@ -34,7 +34,7 @@ export function buildColliders() {
         const x = ox + (sx - 0.5) * (ts - 3);
         const z = oz + (sz - 0.5) * (ts - 3);
         if (Math.hypot(x, z) < 6) continue;
-        if (nearBuilding(x, z, 7)) continue;
+        if (nearBuilding(x, z, 7) || onRoad(x, z, 4)) continue;
         const sc = 0.6 + tileSeed(tx, tz, 300 + i) * 1.4;
         colliders.push({ x, z, r: 0.7 * sc, type: 'rock', scale: sc });
       }
@@ -140,5 +140,8 @@ export function resolveCollisions(pos, radius, collidersOrSpatial) {
 }
 
 export function groundHeight(x, z) {
-  return Math.sin(x * 0.12) * Math.cos(z * 0.1) * 0.4;
+  const h = Math.sin(x * 0.12) * Math.cos(z * 0.1) * 0.4;
+  // Flatten under roads
+  const flat = Math.min(1, Math.max(0, distToRoad(x, z) / 6));
+  return h * flat;
 }

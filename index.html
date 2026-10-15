@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="description" content="LONGWAY — game horor 3D multiplayer di browser.">
+  <meta property="og:title" content="LONGWAY">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#07080a">
+  <link rel="manifest" href="./manifest.webmanifest">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <link rel="icon" href="data:,">
   <title>LONGWAY — Horror 3D</title>
@@ -17,7 +22,20 @@
   <link rel="stylesheet" href="./css/screens/menu.css" />
   <link rel="stylesheet" href="./css/themes/horror.css" />
   <link rel="stylesheet" href="./css/components/mobile.css" />
-  <script type="importmap">
+  <script>
+if (!(HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('importmap'))) {
+  document.addEventListener('DOMContentLoaded', function () {
+    document.body.innerHTML = '<p style="color:#ccc;padding:2rem;font-family:sans-serif">Browser tidak didukung. Perbarui ke iOS 16.4+ atau gunakan Chrome/Firefox terbaru.</p>';
+  });
+}
+window.addEventListener('error', function (e) {
+  if (!e.message) return;
+  var el = document.getElementById('login-error');
+  if (el) el.textContent = e.message + (e.filename ? ' @ ' + e.filename.split('/').pop() + ':' + e.lineno : '');
+  console.error(e.message, e.filename, e.lineno, e.colno);
+});
+</script>
+<script type="importmap">
   {
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
@@ -60,9 +78,12 @@
         <p id="login-error" class="subtitle" style="color:#c44"></p>
       </div>
 
-      <div id="menu-screen" class="screen hidden">
+      <div id="menu-screen" data-attr="1" class="screen hidden">
         <div class="fog-layer" aria-hidden="true"></div>
         <h1 class="flicker-title" data-text="LONGWAY">LONGWAY</h1>
+        <p class="subtitle" style="font-size:0.6rem;opacity:.5">
+          Smily: Bento / Kritis (CC-BY) · Siren / Boiled / Motor / Mobil / Player: via Sketchfab — cek lisensi sebelum publish
+        </p>
         <p class="subtitle">Don't make a sound.</p>
         <p class="subtitle" style="font-size:0.65rem;opacity:0.5">Smily model: Bento / Kritis (CC Attribution, Sketchfab)</p>
         <p id="menu-player-name" class="subtitle"></p>
@@ -116,7 +137,8 @@
       <div id="grain-overlay" aria-hidden="true"></div>
       <div id="vignette-overlay" aria-hidden="true"></div>
       <div id="danger-overlay" aria-hidden="true"></div>
-      <div id="jumpscare-overlay" class="hidden" aria-hidden="true"></div>
+      <div id="lightning-flash" class="hidden" style="position:fixed;inset:0;background:#fff;opacity:0.85;pointer-events:none;z-index:9998"></div>
+    <div id="jumpscare-overlay" class="hidden" aria-hidden="true"></div>
       <div id="hud" class="hidden">
         <div id="stamina-bar"><div id="stamina-fill"></div></div>
         <div id="health-bar"><div id="health-fill"></div></div>
@@ -143,6 +165,28 @@
         <h2>Settings</h2>
         <label>Master Volume <input type="range" id="vol-master" min="0" max="1" step="0.01" value="0.8" /></label>
         <label>SFX Volume <input type="range" id="vol-sfx" min="0" max="1" step="0.01" value="1" /></label>
+        <label>Input Mode
+          <select id="input-mode-select">
+            <option value="auto">Auto</option>
+            <option value="mouse">Mouse</option>
+            <option value="touch">Touch</option>
+          </select>
+        </label>
+        <label>Look Sensitivity <input type="range" id="look-sens" min="0.0005" max="0.008" step="0.0001" value="0.0022" /></label>
+        <label><input type="checkbox" id="invert-y" /> Invert Y</label>
+        <div id="bind-list" style="margin:8px 0;font-size:0.9em">
+          <div data-action="forward">Forward: <button class="btn-bind" type="button">—</button></div>
+          <div data-action="back">Back: <button class="btn-bind" type="button">—</button></div>
+          <div data-action="left">Left: <button class="btn-bind" type="button">—</button></div>
+          <div data-action="right">Right: <button class="btn-bind" type="button">—</button></div>
+          <div data-action="run">Run: <button class="btn-bind" type="button">—</button></div>
+          <div data-action="crouch">Crouch: <button class="btn-bind" type="button">—</button></div>
+          <div data-action="flash">Flashlight: <button class="btn-bind" type="button">—</button></div>
+          <div data-action="hide">Hide: <button class="btn-bind" type="button">—</button></div>
+          <div data-action="throw">Throw: <button class="btn-bind" type="button">—</button></div>
+          <div data-action="interact">Interact: <button class="btn-bind" type="button">—</button></div>
+        </div>
+        <button id="btn-reset-binds" class="btn" type="button">Reset Keys</button>
         <button id="btn-settings-rotate" class="btn" type="button">Putar layar 90°</button>
         <button id="btn-settings-back" class="btn">Back</button>
       </div>
@@ -168,6 +212,7 @@
     <button id="bb-close" class="btn" type="button">Close</button>
     <p id="bb-status" class="subtitle"></p>
   </div>
-  <script type="module" src="./js/main.js?v=4.2"></script>
+  <script type="module" src="./js/main.js?v=4.7"></script>
+<div id="toast" class="hidden" style="position:fixed;bottom:12%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#eee;padding:.6rem 1.2rem;border-radius:6px;z-index:10000;font-size:.9rem;max-width:90%;text-align:center"></div>
 </body>
 </html>

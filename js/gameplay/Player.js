@@ -1,6 +1,10 @@
 import { clampToWorld } from '../core/WorldConfig.js';
 import { isInsideBuilding } from '../core/Buildings.js';
 import { resolveCollisions, groundHeight } from '../core/Collision.js';
+import { binds, isBound } from '../input/Bindings.js';
+import { inputMode } from '../core/Device.js';
+import { nearestSpot } from './HideSpots.js';
+import { seatToWorld } from './Vehicle.js';
 
 const WALK = 2.8, RUN = 5.5, CROUCH = 1.4;
 const STAMINA_DRAIN = 25, STAMINA_REGEN = 18;
@@ -16,6 +20,7 @@ export class PlayerController {
     this.pointerLocked = false;
     this.sensitivity = 0.0022;
     this.touchSensitivity = 0.0052;
+    this.invertY = localStorage.getItem('longway_invertY') === '1';
     this._lookDX = 0;
     this._lookDY = 0;
     this._footAcc = 0;
@@ -31,16 +36,17 @@ export class PlayerController {
 
     window.addEventListener('keydown', (e) => {
       if (typing(e)) return;
-      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(e.code)) e.preventDefault();
+      // Prevent default for any currently-bound movement/action key
+      if (isBound(e.code) || e.code === 'Space') e.preventDefault();
       if (e.code === 'Space') this._spaceDown = true;
       this.keys.add(e.code);
       if (e.repeat) return;
-      if (e.code === 'KeyF') {
+      if (e.code === binds.flash) {
         this.flashlightOn = !this.flashlightOn;
         if (this.state.data.player) this.state.data.player.flashlight = this.flashlightOn;
       }
-      if (e.code === 'KeyH') this.toggleHide();
-      if (e.code === 'KeyQ') this.throwDistraction();
+      if (e.code === binds.hide) this.toggleHide();
+      if (e.code === binds.throw) this.throwDistraction();
     }, opt);
 
     window.addEventListener('keyup', (e) => {
@@ -53,8 +59,9 @@ export class PlayerController {
       this._spaceDown = false;
     }, opt);
 
+    // Pointer lock only when input mode is mouse
     canvas.addEventListener('click', () => {
-      if (window.matchMedia('(pointer: fine)').matches) canvas.requestPointerLock?.();
+      if (inputMode() === 'mouse') canvas.requestPointerLock?.();
     }, opt);
     document.addEventListener('pointerlockchange', () => {
       this.pointerLocked = document.pointerLockElement === canvas;
@@ -70,15 +77,26 @@ export class PlayerController {
     this.keys.clear();
   }
 
+  /** Helper: is the given action currently held? */
+  _down(action) {
+    return this.keys.has(binds[action]);
+  }
+
   toggleHide() {
     const p = this.state.data.player;
     if (p.isDowned) return;
-    const inside = isInsideBuilding(p.position.x, p.position.z);
-    if (!inside && !p.isHiding) return; // can only start hide inside
-    p.isHiding = !p.isHiding;
-    if (!p.isHiding) {
+    if (p.isHiding) {
+      p.isHiding = false;
       p.isHoldingBreath = false;
+      p.hideSpot = null;
+      return;
     }
+    // Prefer typed spot (locker/bed/bush/room); bush works outdoors
+    const spot = nearestSpot(p.position.x, p.position.z);
+    if (!spot) return;
+    p.isHiding = true;
+    p.hideSpot = { id: spot.id, type: spot.type, x: spot.x, z: spot.z };
+    p.noiseAge = 99;
   }
 
   throwDistraction() {
@@ -112,12 +130,24 @@ export class PlayerController {
   _flushLook() {
     const p = this.state.data.player;
     if (!this._lookDX && !this._lookDY) return;
-    // Apply full accumulated delta — no lag smoothing (felt "berat")
     p.rotation.yaw -= this._lookDX;
-    p.rotation.pitch -= this._lookDY;
+    // invertY support
+    p.rotation.pitch -= this._lookDY * (this.invertY ? -1 : 1);
     p.rotation.pitch = Math.max(-1.35, Math.min(1.35, p.rotation.pitch));
     this._lookDX = 0;
     this._lookDY = 0;
+  }
+
+  /** Shared movement vector from current binds. */
+  _moveVector(yaw) {
+    const forward = { x: -Math.sin(yaw), z: -Math.cos(yaw) };
+    const right = { x: Math.cos(yaw), z: -Math.sin(yaw) };
+    let mx = 0, mz = 0;
+    if (this._down('forward')) { mx += forward.x; mz += forward.z; }
+    if (this._down('back'))    { mx -= forward.x; mz -= forward.z; }
+    if (this._down('left'))    { mx -= right.x;   mz -= right.z; }
+    if (this._down('right'))   { mx += right.x;   mz += right.z; }
+    return { mx, mz };
   }
 
   update(dt) {
@@ -126,6 +156,20 @@ export class PlayerController {
     this._flushLook();
     p.flashlight = this.flashlightOn;
 
+    // Battery drain for flashlight + flicker when low
+    if (this.flashlightOn) {
+      p.battery = Math.max(0, (p.battery ?? 100) - dt * 0.6);
+      if (p.battery <= 0) {
+        this.flashlightOn = false;
+        p.flashlight = false;
+      }
+      p._flashFlicker = p.battery < 15 ? 0.5 + Math.random() * 0.5 : 1;
+    } else {
+      p._flashFlicker = 1;
+    }
+    // Age since last noise (for hide inspect)
+    p.noiseAge = (p.noiseAge ?? 99) + dt;
+
     // Riding vehicle — camera look stays free; WASD only if driver
     if (p.ridingVehicleId) {
       const vData = this.state.getVehicle(p.ridingVehicleId);
@@ -133,7 +177,6 @@ export class PlayerController {
         p.ridingVehicleId = null;
         p.ridingRole = null;
       } else {
-        // position lock to seat (drive physics run elsewhere for driver)
         const role = p.ridingRole || 'passenger';
         const seatLocal =
           role === 'driver'
@@ -141,11 +184,10 @@ export class PlayerController {
             : (vData.seatOffsets?.PassengerSeat ||
                vData.seatOffsets?.PassengerSeatFront ||
                { x: 0, y: 1, z: -0.4 });
-        const cos = Math.cos(vData.rotation.yaw);
-        const sin = Math.sin(vData.rotation.yaw);
-        p.position.x = vData.position.x + (seatLocal.x * cos - seatLocal.z * sin);
-        p.position.z = vData.position.z + (seatLocal.x * sin + seatLocal.z * cos);
-        p.position.y = (vData.position.y || 0) + seatLocal.y;
+        const w = seatToWorld(vData, seatLocal);
+        p.position.x = w.x;
+        p.position.y = w.y;
+        p.position.z = w.z;
         p.moveState = 'riding';
         p.isRunning = false;
         return;
@@ -168,13 +210,7 @@ export class PlayerController {
         return;
       }
       let speed = 0.7;
-      const forward = { x: -Math.sin(p.rotation.yaw), z: -Math.cos(p.rotation.yaw) };
-      const right = { x: Math.cos(p.rotation.yaw), z: -Math.sin(p.rotation.yaw) };
-      let mx = 0, mz = 0;
-      if (this.keys.has('KeyW')) { mx += forward.x; mz += forward.z; }
-      if (this.keys.has('KeyS')) { mx -= forward.x; mz -= forward.z; }
-      if (this.keys.has('KeyA')) { mx -= right.x; mz -= right.z; }
-      if (this.keys.has('KeyD')) { mx += right.x; mz += right.z; }
+      const { mx, mz } = this._moveVector(p.rotation.yaw);
       const len = Math.hypot(mx, mz) || 1;
       if (mx || mz) {
         p.position.x += (mx / len) * speed * dt;
@@ -196,7 +232,7 @@ export class PlayerController {
       p.moveState = 'idle';
       p.isHoldingBreath = !!(this._spaceDown || this.keys.has('Space'));
       if (p.isHoldingBreath) {
-        p.breath = Math.max(0, (p.breath ?? 100) - 28 * dt);
+        p.breath = Math.max(0, (p.breath ?? 100) - 12 * dt);
         if (p.breath <= 0) {
           p.isHoldingBreath = false;
           p.breath = 15;
@@ -209,31 +245,26 @@ export class PlayerController {
           });
         }
       } else {
-        p.breath = Math.min(100, (p.breath ?? 100) + 18 * dt);
+        p.breath = Math.min(100, (p.breath ?? 100) + 20 * dt);
       }
       p.position.y = 1.35 + groundHeight(p.position.x, p.position.z);
       return; // no footsteps while hiding
     }
 
-    p.isCrouching = this.keys.has('KeyC');
-    p.isRunning = (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) && !p.isCrouching && p.stamina > 5;
+    p.isCrouching = this._down('crouch');
+    p.isRunning = this._down('run') && !p.isCrouching && p.stamina > 5;
 
     let speed = WALK;
     if (p.isCrouching) speed = CROUCH;
     else if (p.isRunning) speed = RUN;
+    speed *= p._weatherSpeed ?? 1;
 
-    const forward = { x: -Math.sin(p.rotation.yaw), z: -Math.cos(p.rotation.yaw) };
-    const right = { x: Math.cos(p.rotation.yaw), z: -Math.sin(p.rotation.yaw) };
-    let mx = 0, mz = 0;
-    if (this.keys.has('KeyW')) { mx += forward.x; mz += forward.z; }
-    if (this.keys.has('KeyS')) { mx -= forward.x; mz -= forward.z; }
-    if (this.keys.has('KeyA')) { mx -= right.x; mz -= right.z; }
-    if (this.keys.has('KeyD')) { mx += right.x; mz += right.z; }
-    const len = Math.hypot(mx, mz) || 1;
-    const moving = mx !== 0 || mz !== 0;
+    const { mx: rawMx, mz: rawMz } = this._moveVector(p.rotation.yaw);
+    const len = Math.hypot(rawMx, rawMz) || 1;
+    const moving = rawMx !== 0 || rawMz !== 0;
     p.moveState = !moving ? 'idle' : (p.isRunning ? 'run' : 'walk');
-    mx = (mx / len) * speed;
-    mz = (mz / len) * speed;
+    const mx = (rawMx / len) * speed;
+    const mz = (rawMz / len) * speed;
 
     p.position.x += mx * dt;
     p.position.z += mz * dt;
@@ -256,6 +287,7 @@ export class PlayerController {
       if (!moving) break;
       const intensity = p.isRunning ? 0.9 : p.isCrouching ? 0.12 : 0.38;
       const radius = p.isRunning ? 38 : p.isCrouching ? 9 : 18;
+      p.noiseAge = 0;
       this.state.emitSound({
         position: { ...p.position },
         intensity,
@@ -263,7 +295,9 @@ export class PlayerController {
         type: 'footstep',
       });
       if (this.audio) {
-        this.audio.playFootstep(p.position.x, p.position.y, p.position.z, intensity);
+        // Material-aware footstep (wood/concrete inside, grass outside)
+        const mat = isInsideBuilding(p.position.x, p.position.z) ? 'wood' : 'grass';
+        this.audio.playFootstep(p.position.x, p.position.y, p.position.z, intensity, mat);
       }
     }
 
