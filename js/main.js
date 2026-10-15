@@ -80,28 +80,6 @@ async function init() {
   const canvas = document.getElementById('game-canvas');
   try { initFirebase(); } catch (e) { console.warn('Firebase', e); }
 
-  // Complete Google redirect sign-in if returning from Google (timeout so init never hangs)
-  try {
-    initFirebase();
-    const auth = getAuth();
-    const cred = await Promise.race([
-      getRedirectResult(auth),
-      new Promise((res) => setTimeout(() => res(null), 3000)),
-    ]);
-    if (cred && cred.user) {
-      profile.displayName = (cred.user.displayName || 'Player').slice(0, 16);
-      profile.uid = cred.user.uid;
-      profile.provider = 'google';
-      localStorage.setItem('longway_uid', profile.uid);
-      saveProfile(profile);
-      const nameInput = document.getElementById('profile-name');
-      if (nameInput) nameInput.value = profile.displayName;
-      window.__longwayGoogleLogin = true;
-    }
-  } catch (e) {
-    console.warn('getRedirectResult', e);
-  }
-
   // Profile form defaults
   const nameInput = document.getElementById('profile-name');
   if (nameInput) nameInput.value = profile.displayName || '';
@@ -623,7 +601,7 @@ function wireUI(canvas) {
       // force name in firebase
       const { ref, update } = await import('https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js');
       const { getDb } = await import('./net/firebase.js');
-      await update(ref(getDb(), `rooms/${code}/players/${room.uid}`), {
+      await update(ref(getDb(), `rooms/${room.code}/players/${room.uid}`), {
         name: profile.displayName,
       });
       enterLobby();
