@@ -1,6 +1,4 @@
-/** Forces calm gaps between horror events so tension can reset.
- *  Uses a shuffled deck so events don't repeat until the bag is empty.
- */
+/** Tension model + event deck. Unease only when player has been calm. */
 const DECK = ['approachingSound', 'distantSighting', 'trace', 'routeBlocked', 'falseAlarm'];
 
 function shuffle(arr) {
@@ -16,6 +14,20 @@ export class PacingDirector {
     this.cooldownUntil = 0;
     this.calmUntil = 0;
     this.bag = [];
+    this.tension = 0;
+    this.calmFor = 0;
+  }
+
+  update(dt, { monsterDist = 99, chasing = false, sanity = 100 } = {}) {
+    const threat = Math.max(chasing ? 1 : 0, 1 - Math.min(1, monsterDist / 40));
+    const target = Math.min(1, threat + (1 - sanity / 100) * 0.3);
+    const rate = target > this.tension ? 1.5 : 0.25;
+    this.tension += (target - this.tension) * Math.min(1, dt * rate);
+    this.calmFor = this.tension > 0.3 ? 0 : this.calmFor + dt;
+  }
+
+  wantsUnease(now) {
+    return this.calmFor > 45 && now > this.cooldownUntil;
   }
 
   canTriggerEvent(now) {
@@ -29,17 +41,20 @@ export class PacingDirector {
 
   onEventFired(now, calmMin = 40, calmMax = 90) {
     this.cooldownUntil = now + calmMin + Math.random() * (calmMax - calmMin);
+    this.calmFor = 0;
   }
 
-  /** After a chase ends: long calm + one delayed trace so silence itself feels wrong. */
   onChaseEnd(now) {
     this.cooldownUntil = now + 40;
     this.calmUntil = now + 40;
+    this.calmFor = 0;
   }
 
   reset() {
     this.cooldownUntil = 0;
     this.calmUntil = 0;
     this.bag = [];
+    this.tension = 0;
+    this.calmFor = 0;
   }
 }

@@ -10,7 +10,13 @@
     "ignore": [
       "firebase.json",
       "**/.*",
-      "**/node_modules/**"
+      "**/node_modules/**",
+      "database.rules.json",
+      "storage.rules",
+      "cors.json",
+      "vercel.json",
+      "README.md",
+      "**/*.md"
     ],
     "headers": [
       {

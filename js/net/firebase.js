@@ -173,6 +173,14 @@ export class MultiplayerRoom {
       name: 'Player_' + this.uid.slice(-4),
       joinedAt: Date.now(),
     });
+    // Re-register onDisconnect on every reconnect
+    if (!this._connWatch) {
+      this._connWatch = true;
+      const unsub = onValue(ref(this.db, '.info/connected'), (s) => {
+        if (s.val()) this._setupDisconnect();
+      });
+      this.unsubs.push(() => unsub());
+    }
   }
 
   _setupDisconnect() {
@@ -231,7 +239,7 @@ export class MultiplayerRoom {
       name: prev.name || 'Player_' + this.uid.slice(-4),
       joinedAt: prev.joinedAt || Date.now(),
     };
-    if (this.isHost) {
+    if (this.isHost || !this.remotePlayers[this.uid]) {
       Object.assign(own, {
         alive: player.alive !== false,
         health: player.health ?? 100,
@@ -313,6 +321,13 @@ export class MultiplayerRoom {
     const me = this.uid;
     if (v.driverUid && v.driverUid !== me && !this.isHost) return Promise.resolve();
     if (this.isHost && v.driverUid && v.driverUid !== me) return Promise.resolve();
+    // Clear driver on disconnect so vehicle is not stuck
+    if (v.driverUid === me && this._odv !== v.id) {
+      this._odv = v.id;
+      try {
+        onDisconnect(ref(this.db, `rooms/${this.code}/vehicles/${v.id}/driver`)).set(null);
+      } catch (e) { /* */ }
+    }
     return set(ref(this.db, `rooms/${this.code}/vehicles/${v.id}`), {
       type: v.type,
       x: v.position.x,

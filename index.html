@@ -29,7 +29,7 @@ if (!(HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.suppo
   });
 }
 window.addEventListener('error', function (e) {
-  if (!e.message) return;
+  if (!/[?&]debug\b/.test(location.search) || !e.message) return;
   var el = document.getElementById('login-error');
   if (el) el.textContent = e.message + (e.filename ? ' @ ' + e.filename.split('/').pop() + ':' + e.lineno : '');
   console.error(e.message, e.filename, e.lineno, e.colno);
@@ -81,11 +81,8 @@ window.addEventListener('error', function (e) {
       <div id="menu-screen" data-attr="1" class="screen hidden">
         <div class="fog-layer" aria-hidden="true"></div>
         <h1 class="flicker-title" data-text="LONGWAY">LONGWAY</h1>
-        <p class="subtitle" style="font-size:0.6rem;opacity:.5">
-          Smily: Bento / Kritis (CC-BY) · Siren / Boiled / Motor / Mobil / Player: via Sketchfab — cek lisensi sebelum publish
-        </p>
         <p class="subtitle">Don't make a sound.</p>
-        <p class="subtitle" style="font-size:0.65rem;opacity:0.5">Smily model: Bento / Kritis (CC Attribution, Sketchfab)</p>
+        <p class="subtitle" style="font-size:0.6rem;opacity:.5">Models via Sketchfab — Smily: Bento/Kritis (CC-BY). Cek lisensi Siren, Boiled, kendaraan, player sebelum publish komersial.</p>
         <p id="menu-player-name" class="subtitle"></p>
         <label class="mode-label">Mode
           <select id="game-mode">
@@ -140,8 +137,12 @@ window.addEventListener('error', function (e) {
       <div id="lightning-flash" class="hidden" style="position:fixed;inset:0;background:#fff;opacity:0.85;pointer-events:none;z-index:9998"></div>
     <div id="jumpscare-overlay" class="hidden" aria-hidden="true"></div>
       <div id="hud" class="hidden">
+        <button id="btn-hud-settings" class="btn" type="button"
+          style="position:absolute;top:.5rem;right:.5rem;min-width:0;padding:.4rem .7rem;z-index:30">⚙</button>
         <div id="stamina-bar"><div id="stamina-fill"></div></div>
         <div id="health-bar"><div id="health-fill"></div></div>
+        <div id="battery-bar" title="Battery"><div id="battery-fill"></div></div>
+        <p id="battery-warn" class="hidden" style="position:fixed;bottom:18%;left:50%;transform:translateX(-50%);color:#fc6;font-size:.85rem;text-shadow:0 0 6px #000">Baterai habis — cari battery</p>
         <div id="sanity-bar" title="Sanity"><div id="sanity-fill"></div></div>
         <p id="whisper-caption" class="hidden" aria-hidden="true">…did you hear that?</p>
         <div id="suspicion-indicator"></div>
@@ -212,7 +213,7 @@ window.addEventListener('error', function (e) {
     <button id="bb-close" class="btn" type="button">Close</button>
     <p id="bb-status" class="subtitle"></p>
   </div>
-  <script type="module" src="./js/main.js?v=4.8"></script>
+  <script type="module" src="./js/main.js?v=5.6"></script>
 <div id="toast" class="hidden" style="position:fixed;bottom:12%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#eee;padding:.6rem 1.2rem;border-radius:6px;z-index:10000;font-size:.9rem;max-width:90%;text-align:center"></div>
 </body>
 </html>

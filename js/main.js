@@ -310,8 +310,13 @@ async function setupLocalGame(fromSave = false) {
   touch.onHide = () => player.toggleHide();
   touch.onThrowBtn = () => player.throwDistraction();
   touch.onFlashToggle = () => {
-    player.flashlightOn = !player.flashlightOn;
-    if (state.data.player) state.data.player.flashlight = player.flashlightOn;
+    const bat = state.data.player?.battery ?? 100;
+    if (!player.flashlightOn && bat <= 0) {
+      state.data.player._batWarn = 2;
+    } else {
+      player.flashlightOn = !player.flashlightOn;
+      if (state.data.player) state.data.player.flashlight = player.flashlightOn;
+    }
   };
 
   const applyInputMode = (m) => {
@@ -504,8 +509,16 @@ function wireUI(canvas) {
     startLoop();
   });
 
+  let settingsFromGame = false;
+  document.getElementById('btn-hud-settings')?.addEventListener('click', () => {
+    document.exitPointerLock?.();
+    settingsFromGame = true;
+    if (typeof touch !== 'undefined' && touch) touch.hide();
+    document.getElementById('btn-settings').click();
+  });
+
   document.getElementById('btn-settings').addEventListener('click', () => {
-    document.getElementById('menu-screen').classList.add('hidden');
+    if (!settingsFromGame) document.getElementById('menu-screen').classList.add('hidden');
     document.getElementById('settings-screen').classList.remove('hidden');
     // refresh bind labels + input select
     const sel = document.getElementById('input-mode-select');
@@ -520,6 +533,12 @@ function wireUI(canvas) {
   });
   document.getElementById('btn-settings-back').addEventListener('click', () => {
     document.getElementById('settings-screen').classList.add('hidden');
+    if (settingsFromGame) {
+      settingsFromGame = false;
+      document.getElementById('game-canvas')?.focus();
+      if (typeof touch !== 'undefined' && touch && inputMode() === 'touch') touch.show();
+      return;
+    }
     document.getElementById('menu-screen').classList.remove('hidden');
   });
 
@@ -816,6 +835,23 @@ function hideJumpscare() {
   clearTimeout(jumpscareHideTimer);
 }
 
+function spawnDefaultVehicles() {
+  if (!state) return;
+  if ((state.data.vehicles || []).length > 0 || vehicleControllers.length > 0) return;
+  // Near player spawn (0, 8) on the main road
+  const spots = [
+    { type: 'motor', x: 4, z: 10 },
+    { type: 'mobil', x: -6, z: 12 },
+  ];
+  for (const s of spots) {
+    const v = new VehicleController(s.type, { x: s.x, y: 0, z: s.z });
+    v.ownerUid = room?.uid || deviceUid();
+    vehicleControllers.push(v);
+  }
+  state.data.vehicles = vehicleControllers;
+  if (renderer) renderer.syncVehicles(vehicleControllers);
+}
+
 function spawnVehicle(type) {
   if (!state || !player) return;
   const p = state.data.player.position;
@@ -826,6 +862,7 @@ function spawnVehicle(type) {
     z: p.z - Math.cos(yaw) * 4,
   };
   const v = new VehicleController(type, pos);
+  v.ownerUid = room?.uid || deviceUid();
   if (!state.data.vehicles) state.data.vehicles = [];
   state.data.vehicles.push(v);
   vehicleControllers.push(v);
@@ -847,6 +884,7 @@ function tryVehicleInteract() {
       p.position.z = spot.z;
       p.position.y = 1.7;
       v.dismount(myUid);
+      if (room) room.writeVehicle(v);
     }
     p.ridingVehicleId = null;
     p.ridingRole = null;
@@ -857,7 +895,7 @@ function tryVehicleInteract() {
   if (!player.keys.has(binds.interact) || player._eLatch) return;
   for (const v of state.data.vehicles || []) {
     const d = Math.hypot(v.position.x - p.position.x, v.position.z - p.position.z);
-    if (d < 2.2) {
+    if (d < 3.5) {
       player._eLatch = true;
       const role = v.mount(myUid, !v.driverUid);
       if (role) {
@@ -886,8 +924,11 @@ function startLoop() {
     // Vehicle physics (local driver or host)
     const myUid = room?.uid || deviceUid();
     for (const v of vehicleControllers) {
-      if (v.driverUid === myUid) {
-        v.driveUpdate(dt, player.keys, colliders, state, audio, myUid);
+      const isDriver = v.driverUid === myUid
+        || (state.data.player.ridingVehicleId === v.id && state.data.player.ridingRole === 'driver');
+      if (isDriver) {
+        if (!v.driverUid) v.driverUid = myUid;
+        v.driveUpdate(dt, player.keys, colliders, state, audio, v.driverUid || myUid);
         v.checkMonsterHits(state.data.monsters, now, (dmg) => {
           const pl = state.data.player;
           if (pl.isDowned) {
@@ -911,10 +952,11 @@ function startLoop() {
     if (room && room.remoteVehicles) {
       const list = [];
       for (const [id, rv] of Object.entries(room.remoteVehicles)) {
-        if (rv.driver === myUid) continue;
+        if (rv.driver === myUid || state.data.player.ridingVehicleId === id) continue;
         let v = vehicleControllers.find((x) => x.id === id);
         if (!v) {
           v = new VehicleController(rv.type || 'motor', { x: rv.x, y: rv.y, z: rv.z }, id);
+          v.remote = true;
           vehicleControllers.push(v);
         }
         v.position.x = rv.x; v.position.y = rv.y || 0; v.position.z = rv.z;
@@ -1006,9 +1048,18 @@ function startLoop() {
         if (room.remotePlayers[room.uid]) {
           /* name already set */
         }
+        // Any client may write vehicles they drive / own (not remote copies)
+        for (const v of vehicleControllers) {
+          if (v.remote) continue;
+          if (
+            v.driverUid === room.uid ||
+            (!v.driverUid && (v.ownerUid === room.uid || (room.isHost && !v.ownerUid)))
+          ) {
+            room.writeVehicle(v);
+          }
+        }
         if (room.isHost) {
           room.writeMonsters(state.data.monsters);
-          for (const v of vehicleControllers) room.writeVehicle(v);
           room.writeGame(state.data.progress, state.data.world.weather);
         }
         let last = null;
@@ -1059,6 +1110,13 @@ function startLoop() {
     if (pt) pt.textContent = '×' + (state.data.player.throwables ?? 0);
     const hp = document.getElementById('health-fill');
     if (hp) hp.style.width = `${state.data.player.health}%`;
+    const bf = document.getElementById('battery-fill');
+    const bb = document.getElementById('battery-bar');
+    const bat = state.data.player.battery ?? 100;
+    if (bf) bf.style.width = `${Math.max(0, Math.min(100, bat))}%`;
+    if (bb) bb.classList.toggle('low', bat < 20);
+    const bw = document.getElementById('battery-warn');
+    if (bw) bw.classList.toggle('hidden', !(state.data.player._batWarn > 0));
 
     const eye = player.eyePosition;
     const yaw = state.data.player.rotation.yaw;
@@ -1148,7 +1206,17 @@ function startLoop() {
 
     // World atmosphere director (unseen props only)
     if (!worldDirector && renderer?.scene) {
-      worldDirector = new WorldDirector(pacing, renderer.scene);
+      worldDirector = new WorldDirector(renderer.scene, pacing, audio);
+    }
+    {
+      let mDist = 99, chasing = false;
+      for (const m of state.data.monsters || []) {
+        if (m.active === false) continue;
+        const d = Math.hypot(m.position.x - state.data.player.position.x, m.position.z - state.data.player.position.z);
+        if (d < mDist) mDist = d;
+        if (m.aiState === 'CHASE' || m.aiState === 'ATTACK') chasing = true;
+      }
+      pacing.update(dt, { monsterDist: mDist, chasing, sanity: state.data.player.sanity ?? 100 });
     }
     if (worldDirector && renderer?.camera) {
       worldDirector.update(dt, now, renderer.camera, state.data.player.sanity ?? 100);

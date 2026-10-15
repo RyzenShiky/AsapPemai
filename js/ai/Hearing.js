@@ -56,7 +56,7 @@ export function processHearing(monster, events, now, suspicion, weatherMul = 1) 
     heard.push(ev);
 
     if (!firstTimeHeard(monster, ev, now)) continue;
-    suspicion.add(SuspicionSystem.intensityToSuspicion(perceived, atten * occ));
+    suspicion.add(SuspicionSystem.intensityToSuspicion(perceived, Math.sqrt(atten * occ)));
     recordHeard(monster.memory, ev.position, perceived, now);
     monster.memory.suspicion = suspicion.value;
     sharedBlackboard.reportHeard(monster.id || 'm0', ev.position, perceived, now);

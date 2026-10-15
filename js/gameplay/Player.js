@@ -42,8 +42,14 @@ export class PlayerController {
       this.keys.add(e.code);
       if (e.repeat) return;
       if (e.code === binds.flash) {
-        this.flashlightOn = !this.flashlightOn;
-        if (this.state.data.player) this.state.data.player.flashlight = this.flashlightOn;
+        const bat = this.state.data.player?.battery ?? 100;
+        if (!this.flashlightOn && bat <= 0) {
+          // dead battery — ignore toggle on
+          this.state.data.player._batWarn = 2;
+        } else {
+          this.flashlightOn = !this.flashlightOn;
+          if (this.state.data.player) this.state.data.player.flashlight = this.flashlightOn;
+        }
       }
       if (e.code === binds.hide) this.toggleHide();
       if (e.code === binds.throw) this.throwDistraction();
@@ -156,17 +162,23 @@ export class PlayerController {
     this._flushLook();
     p.flashlight = this.flashlightOn;
 
-    // Battery drain for flashlight + flicker when low
+    // Battery: slow drain when on (~14 min full); tiny recharge when off
     if (this.flashlightOn) {
-      p.battery = Math.max(0, (p.battery ?? 100) - dt * 0.6);
+      p.battery = Math.max(0, (p.battery ?? 100) - dt * 0.12);
       if (p.battery <= 0) {
         this.flashlightOn = false;
         p.flashlight = false;
+        p._batWarn = 2;
       }
-      p._flashFlicker = p.battery < 15 ? 0.5 + Math.random() * 0.5 : 1;
+      // Flicker harder under 20%
+      if (p.battery < 20) p._flashFlicker = 0.35 + Math.random() * 0.65;
+      else if (p.battery < 40) p._flashFlicker = 0.75 + Math.random() * 0.25;
+      else p._flashFlicker = 1;
     } else {
+      p.battery = Math.min(100, (p.battery ?? 100) + dt * 0.04); // slow passive charge
       p._flashFlicker = 1;
     }
+    if (p._batWarn > 0) p._batWarn -= dt;
     // Age since last noise (for hide inspect)
     p.noiseAge = (p.noiseAge ?? 99) + dt;
 
@@ -285,8 +297,8 @@ export class PlayerController {
     while (this._footAcc >= 1) {
       this._footAcc -= 1;
       if (!moving) break;
-      const intensity = p.isRunning ? 0.9 : p.isCrouching ? 0.12 : 0.38;
-      const radius = p.isRunning ? 38 : p.isCrouching ? 9 : 18;
+      const intensity = p.isRunning ? 1.0 : p.isCrouching ? 0.15 : 0.6;
+      const radius = p.isRunning ? 50 : p.isCrouching ? 10 : 28;
       p.noiseAge = 0;
       this.state.emitSound({
         position: { ...p.position },

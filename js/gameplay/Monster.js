@@ -56,6 +56,27 @@ export class MonsterController {
     return 1 + (sus / 100) * 0.7 + Math.min(1, intens) * 0.5;
   }
 
+  /** Weakness multipliers: light (flashlight cone) / silence (quiet player). */
+  _weakMul(m, dt) {
+    const p = this.state.data.player;
+    if (!p) return 1;
+
+    if (this.cfg.weak === 'light' && p.flashlight) {
+      const dx = m.position.x - p.position.x;
+      const dz = m.position.z - p.position.z;
+      const d = Math.hypot(dx, dz);
+      const yaw = p.rotation.yaw;
+      const facing = d > 0 ? (dx * -Math.sin(yaw) + dz * -Math.cos(yaw)) / d : 0;
+      if (d < 16 && facing > 0.94) return 0.45;
+    }
+
+    if (this.cfg.weak === 'silence' && (p.noiseAge ?? 99) > 4 && !m.memory.canSeePlayer) {
+      const s = this.perception?.suspicion;
+      if (s && typeof s.value === 'number') s.value = Math.max(0, s.value - 10 * dt);
+    }
+    return 1;
+  }
+
   update(dt, now) {
     const m = this.state.data.monsters[this.index];
     if (!m || m.active === false) return; // night schedule
@@ -70,7 +91,7 @@ export class MonsterController {
         : this.state.data.world.weather === 'storm'
           ? 0.55
           : 1;
-    const weatherMulClamped = Math.max(0.6, weatherMul) * (this.state._hearingMask ?? 1) * (this.cfg.hearMul ?? 1);
+    const weatherMulClamped = Math.max(0.6, weatherMul) * (this.state._hearingMask ?? 1) * (this.cfg.sense?.hear ?? this.cfg.hearMul ?? 1);
 
     const ppos = this.state.data.player.position;
     const distP = Math.hypot(m.position.x - ppos.x, m.position.z - ppos.z);
@@ -85,9 +106,11 @@ export class MonsterController {
           : this.state.data.world.weather === 'rain'
             ? 0.8
             : 1;
-      const range = this.state.data.player.isHiding ? 7 : 28;
+      const sense = this.cfg.sense || {};
+      const range = this.state.data.player.isHiding ? 7 : (sense.sightRange ?? 28);
+      const fov = sense.fov ?? 1.9;
       const lampSites = this.state._lampSites || null;
-      m.memory.canSeePlayer = canSee(m, ppos, this.colliders, { light, range, lampSites });
+      m.memory.canSeePlayer = canSee(m, ppos, this.colliders, { light, range, fov, lampSites });
       if (m.memory.canSeePlayer) {
         m.memory.lastSeenPosition = { x: ppos.x, y: ppos.y, z: ppos.z };
         m.memory.lastSeenTime = now;
@@ -102,10 +125,15 @@ export class MonsterController {
       canSee: m.memory.canSeePlayer,
     });
 
-    const frenzy = this._frenzyMul(m);
+    const frenzy = this._frenzyMul(m) * this._weakMul(m, dt);
     const base = this.moveSpeed;
     const prevX = m.position.x;
     const prevZ = m.position.z;
+
+    if (m.aiState !== this._prevAi) {
+      if (m.aiState === 'SEARCH') this._searchStep = 0;
+      this._prevAi = m.aiState;
+    }
 
     switch (m.aiState) {
       case 'STUNNED':
@@ -120,7 +148,7 @@ export class MonsterController {
         break;
       case 'SEARCH':
         if (!this.target || distXZ(m.position, this.target) < 1.5) {
-          this.target = pickSearchTarget(m.memory);
+          this.target = pickSearchTarget(m.memory, this.cfg.search, this._searchStep++);
         }
         if (this.target) this.moveToward(m, this.target, dt, base * frenzy);
         break;

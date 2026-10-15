@@ -98,8 +98,9 @@ export class VehicleController {
     this.crashShake = Math.max(0, this.crashShake - dt * 2);
     if (this.driverUid !== myUid) return;
 
-    const turn = (keys.has('KeyA') ? 1 : 0) - (keys.has('KeyD') ? 1 : 0);
-    const throttle = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0);
+    const down = (codes) => codes.some((c) => keys.has(c));
+    const turn = (down(['KeyA', 'ArrowLeft']) ? 1 : 0) - (down(['KeyD', 'ArrowRight']) ? 1 : 0);
+    const throttle = (down(['KeyW', 'ArrowUp']) ? 1 : 0) - (down(['KeyS', 'ArrowDown']) ? 1 : 0);
     const maxSpd = this.type === 'motor' ? 9 : 14;
     const turnRate = this.type === 'motor' ? 2.2 : 1.3;
 

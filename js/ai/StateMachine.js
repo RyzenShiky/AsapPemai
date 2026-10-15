@@ -109,13 +109,27 @@ export function updateMonsterState(current, ctx) {
   }
 }
 
-export function pickSearchTarget(mem) {
-  if (!mem.lastHeardPosition) return null;
-  const r = mem.searchRadius * (0.3 + Math.random() * 0.7);
+export function pickSearchTarget(mem, style, step = 0) {
+  const c = mem.lastHeardPosition;
+  if (!c) return null;
+  const R = mem.searchRadius || 12;
+
+  if (style === 'spiral') {
+    const a = step * 2.4;
+    const r = Math.min(R, 3 + step * 2.2);
+    return { x: c.x + Math.cos(a) * r, y: c.y, z: c.z + Math.sin(a) * r };
+  }
+  if (style === 'sweep') {
+    const d = (mem._sweepDir ??= Math.random() * Math.PI);
+    const side = step % 2 ? 1 : -1;
+    const lane = ((Math.floor(step / 2) % 3) - 1) * R * 0.35;
+    return {
+      x: c.x + Math.cos(d) * side * R + Math.cos(d + Math.PI / 2) * lane,
+      y: c.y,
+      z: c.z + Math.sin(d) * side * R + Math.sin(d + Math.PI / 2) * lane,
+    };
+  }
+  const r = R * (0.3 + Math.random() * 0.7);
   const a = Math.random() * Math.PI * 2;
-  return {
-    x: mem.lastHeardPosition.x + Math.cos(a) * r,
-    y: mem.lastHeardPosition.y,
-    z: mem.lastHeardPosition.z + Math.sin(a) * r,
-  };
+  return { x: c.x + Math.cos(a) * r, y: c.y, z: c.z + Math.sin(a) * r };
 }

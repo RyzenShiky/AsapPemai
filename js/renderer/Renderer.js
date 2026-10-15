@@ -991,6 +991,18 @@ export class Renderer {
   }
 
 
+  /** Visual-only hallucination silhouette (not a real monster). */
+  spawnGhost(pos) {
+    const g = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.35, 1.2, 4, 8),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.85 })
+    );
+    g.position.set(pos.x, 1.0, pos.z);
+    g.userData.hallucination = true;
+    this.scene.add(g);
+    return g;
+  }
+
   render(state, eye, yaw, pitch, dt = 0) {
     for (const mixer of this.mixers) mixer.update(dt || 0);
     // Hide local ridden vehicle (first-person); others still see it
@@ -1010,15 +1022,16 @@ export class Renderer {
     // Flashlight follows look direction
     if (this.flashlight) {
       const on = !!(state.player && state.player.flashlight);
-      // High intensity to cut through fog + dark materials
-      this.flashlight.intensity = on ? (this._rainOn ? 14 : 11) : 0;
-      this.flashlight.distance = 50;
+      const flick = state.player?._flashFlicker ?? 1;
+      const base = this._rainOn ? 14 : 11;
+      this.flashlight.intensity = on ? base * flick : 0;
+      this.flashlight.distance = on ? 50 : 0;
       this.flashlight.position.copy(this.camera.position);
       const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
       this.flashlightTarget.position.copy(this.camera.position).addScaledVector(dir, 18);
       this.flashlight.target.updateMatrixWorld();
       if (this.flashlightFill) {
-        this.flashlightFill.intensity = on ? 2.5 : 0;
+        this.flashlightFill.intensity = on ? 2.5 * flick : 0;
         this.flashlightFill.position.copy(this.camera.position);
       }
     }

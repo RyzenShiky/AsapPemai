@@ -15,8 +15,8 @@ function pickWeighted(table) {
 
 const TABLE = {
   shaken: [['falseStep', 1]],
-  low: [['falseStep', 3], ['figure', 2], ['shadowLag', 1]],
-  critical: [['figure', 3], ['falseStep', 2], ['shadowLag', 2], ['fakeClue', 1]],
+  low: [['falseStep', 3], ['figure', 2]],
+  critical: [['figure', 3], ['falseStep', 2], ['fakeClue', 1]],
 };
 
 function behind(p, d = 8) {
@@ -46,7 +46,6 @@ export class HallucinationDirector {
   }
 
   update(dt, tier, player, cam) {
-    // Fade / cull fake ghosts
     for (let i = this._ghosts.length - 1; i >= 0; i--) {
       const g = this._ghosts[i];
       g.life -= dt;
@@ -63,45 +62,32 @@ export class HallucinationDirector {
     if ((this.t -= dt) > 0 || !TABLE[tier]) return;
     this.t = (tier === 'critical' ? 12 : 25) * (0.7 + Math.random() * 0.6);
     const kind = pickWeighted(TABLE[tier]);
-    if (typeof this[kind] === "function") this[kind](player, cam);
+    if (typeof this[kind] === 'function') this[kind](player, cam);
   }
 
   figure(p) {
     const pos = aheadOf(p, 18 + Math.random() * 8, (Math.random() - 0.5) * 1.2);
-    // Visual-only ghost: renderer may spawn a translucent silhouette if available
     if (this.renderer?.spawnGhost) {
-      const mesh = this.renderer.spawnGhost(pos, { vanishIfWithin: 6, vanishIfSeen: 1.2 });
+      const mesh = this.renderer.spawnGhost(pos);
       this._ghosts.push({ ...pos, life: 4, vanishIfWithin: 6, mesh });
-    } else {
-      this._ghosts.push({ ...pos, life: 3.5, vanishIfWithin: 6, mesh: null });
     }
   }
 
   falseStep(p) {
-    // Audio only — does NOT go through state.emitSound, so monster never hears it
     if (!this.audio?.playFootstep) return;
     const b = behind(p, 7 + Math.random() * 4);
     this.audio.playFootstep(b.x, b.y, b.z, 0.45, 'grass');
   }
 
-  shadowLag() {
-    // Brief wrong-direction sun swing if renderer supports it
-    if (this.renderer?.swingSun) {
-      this.renderer.swingSun(0.5 + Math.random() * 0.3, 2.0);
-    }
-  }
-
-  fakeClue(p) {
-    // Caption only — no real interactable
+  fakeClue() {
     const el = document.getElementById('whisper-caption');
-    if (el) {
-      el.textContent = '…sesuatu bergerak di sudut mata…';
-      el.classList.remove('hidden');
-      setTimeout(() => {
-        el.classList.add('hidden');
-        el.textContent = '';
-      }, 2200);
-    }
+    if (!el) return;
+    el.textContent = '…sesuatu bergerak di sudut mata…';
+    el.classList.remove('hidden');
+    setTimeout(() => {
+      el.classList.add('hidden');
+      el.textContent = '';
+    }, 2200);
   }
 
   reset() {

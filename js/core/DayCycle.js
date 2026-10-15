@@ -2,7 +2,7 @@
  * Day cycle: afternoon → sunset → night → dawn (loop).
  * DAY_SECONDS = length of one full day for lighting/phase.
  */
-export const DAY_SECONDS = 180; // one full day cycle
+export const DAY_SECONDS = 480; // 8 minutes full cycle (was 180)
 /** @deprecated use DAY_SECONDS — kept for older imports */
 export const MATCH_SECONDS = DAY_SECONDS;
 
@@ -34,25 +34,26 @@ const night = {
   clear: 0x050608,
 };
 
+// Longer night: afternoon 25% · sunset 15% · night 50% · dawn 10%
 const KEYS = [
   { t: 0.0, ...afternoon },
-  { t: 0.35, ...sunset },
-  { t: 0.65, ...night },
-  { t: 0.9, ...night },
-  { t: 1.0, ...afternoon }, // dawn: closes the loop without a jump
+  { t: 0.25, ...sunset },
+  { t: 0.40, ...night },
+  { t: 0.90, ...night },
+  { t: 1.0, ...afternoon },
 ];
 
 const smooth = (t) => t * t * (3 - 2 * t);
 
 /**
  * Progress within a single day (0..1).
- * afternoon (0–0.35) → sunset (0.35–0.65) → night (0.65–0.9) → dawn (0.9–1)
+ * afternoon (0–0.25) → sunset (0.25–0.40) → night (0.40–0.90) → dawn (0.90–1)
  */
 export function phaseFromProgress(p) {
   const x = ((p % 1) + 1) % 1;
-  if (x < 0.35) return 'afternoon';
-  if (x < 0.65) return 'sunset';
-  if (x < 0.9) return 'night';
+  if (x < 0.25) return 'afternoon';
+  if (x < 0.40) return 'sunset';
+  if (x < 0.90) return 'night';
   return 'dawn';
 }
 
@@ -85,26 +86,44 @@ function lerpLight(a, b, t) {
   };
 }
 
-function lerpColor(c1, c2, t) {
-  const r1 = (c1 >> 16) & 255,
-    g1 = (c1 >> 8) & 255,
-    b1 = c1 & 255;
-  const r2 = (c2 >> 16) & 255,
-    g2 = (c2 >> 8) & 255,
-    b2 = c2 & 255;
-  const r = Math.round(r1 + (r2 - r1) * t);
-  const g = Math.round(g1 + (g2 - g1) * t);
-  const b = Math.round(b1 + (b2 - b1) * t);
-  return (r << 16) | (g << 8) | b;
+function lerpColor(a, b, t) {
+  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+  const r = (ar + (br - ar) * t) | 0;
+  const g = (ag + (bg - ag) * t) | 0;
+  const bl = (ab + (bb - ab) * t) | 0;
+  return (r << 16) | (g << 8) | bl;
 }
 
-export function randomMonsterSpawn(playerPos, minR = 45, maxR = 110) {
-  const ang = Math.random() * Math.PI * 2;
-  const r = minR + Math.random() * (maxR - minR);
-  let x = (playerPos?.x || 0) + Math.cos(ang) * r;
-  let z = (playerPos?.z || 0) + Math.sin(ang) * r;
-  const lim = 200;
-  x = Math.max(-lim, Math.min(lim, x));
-  z = Math.max(-lim, Math.min(lim, z));
-  return { x, y: 0, z };
+/**
+ * Random spawn away from players.
+ * Accepts: players array, OR single {x,z}, OR (pos, minDist, maxDist) legacy args.
+ */
+export function randomMonsterSpawn(playersOrPos = [], minDist = 28, maxDist = null) {
+  let list = playersOrPos;
+  if (!list) list = [];
+  else if (!Array.isArray(list)) {
+    // single player position object
+    list = [list];
+  }
+  const minR = typeof minDist === 'number' ? minDist : 28;
+  const maxR = typeof maxDist === 'number' && maxDist > minR ? maxDist : minR + 50;
+
+  for (let i = 0; i < 24; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = minR + Math.random() * (maxR - minR);
+    const origin = list[0] || { x: 0, z: 8 };
+    const x = (origin.x || 0) + Math.cos(a) * r;
+    const z = (origin.z || 0) + Math.sin(a) * r;
+    let ok = true;
+    for (const p of list) {
+      if (!p) continue;
+      if (Math.hypot((p.x || 0) - x, (p.z || 0) - z) < minR) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return { x, y: 0, z };
+  }
+  return { x: 40, y: 0, z: -40 };
 }

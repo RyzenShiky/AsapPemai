@@ -208,3 +208,21 @@
 }
 .bb-panel.open { display: block; }
 .bb-panel input[type=file] { width: 100%; margin: 0.5rem 0; }
+
+#battery-bar {
+  position: fixed;
+  left: 1rem;
+  bottom: 4.5rem;
+  width: 8rem;
+  height: 0.35rem;
+  background: rgba(0,0,0,0.5);
+  border: 1px solid rgba(255,220,100,0.35);
+  z-index: 20;
+}
+#battery-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #c80, #fc6);
+  transition: width 0.15s linear;
+}
+#battery-bar.low #battery-fill { background: #c44; }

@@ -41,3 +41,32 @@
   padding: 0.55rem 0.75rem; background: #111; border: 1px solid #444;
   color: #eee; border-radius: 4px; font-size: 0.9rem;
 }
+
+#settings-screen {
+  justify-content: flex-start !important;
+  align-items: center;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  padding: 1.5rem 1rem 3rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  z-index: 40;
+}
+#settings-screen > * {
+  flex-shrink: 0;
+}
+#settings-screen #bind-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem 0.8rem;
+  width: min(90vw, 420px);
+  max-width: 100%;
+}
+#settings-screen .btn {
+  width: min(80vw, 280px);
+}
+#hud #btn-hud-settings {
+  pointer-events: auto;
+  z-index: 40;
+}
