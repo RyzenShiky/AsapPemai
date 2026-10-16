@@ -1,6 +1,10 @@
 const DOOR_W = 1.7;
 const WALL_T = 0.35;
 
+/** Billboard facing road. */
+export const BILLBOARD = { x: 62, z: -34, yaw: 0, w: 36, h: 20, base: 4 };
+export const TV_HOUSES = ['tavern', 'store', 'house_1', 'house_3', 'house_5', 'house_9', 'house_11'];
+
 export const BUILDING_DEFS = [
   { id: 'tavern', name: "Joe's Tavern", x: 30, z: -13, w: 14, d: 10, h: 4.2, door: 's', type: 'building', color: 0x4a3322 },
   { id: 'store', name: 'General Store', x: -30, z: -12, w: 12, d: 9, h: 3.8, door: 's', type: 'building', color: 0x3a3430 },
@@ -58,6 +62,12 @@ export function buildingWallColliders(def) {
 export function allBuildingColliders() {
   const out = [];
   for (const def of BUILDING_DEFS) out.push(...buildingWallColliders(def));
+  try {
+    for (const sx of [-0.3, 0.3]) {
+      const cx = BILLBOARD.x + sx * BILLBOARD.w;
+      out.push({ minX: cx - 0.7, maxX: cx + 0.7, minZ: BILLBOARD.z - 1, maxZ: BILLBOARD.z + 0.3, type: 'wall' });
+    }
+  } catch (e) { /* */ }
   return out;
 }
 
@@ -70,6 +80,10 @@ export function nearBuilding(px, pz, margin = 8) {
       pz < b.z + b.d / 2 + margin
     ) return true;
   }
+    try {
+    const B = BILLBOARD;
+    if (Math.abs(px - B.x) < B.w / 2 + margin && Math.abs(pz - B.z) < 1.5 + margin) return true;
+  } catch (e) { /* */ }
   return false;
 }
 

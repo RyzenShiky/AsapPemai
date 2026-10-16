@@ -39,12 +39,17 @@ body.horror-theme {
 
 /* ---------- Sanity-driven color grading on the whole app shell ---------- */
 #app {
-  filter:
-    hue-rotate(var(--sanity-hue))
-    blur(var(--sanity-blur))
-    saturate(calc(1 - var(--sanity-desat)));
+  filter: none;
+  transition: none;
+}
+#app.sanity-shaken,
+#app.sanity-low,
+#app.sanity-critical {
+  filter: hue-rotate(var(--sanity-hue, 0deg)) saturate(calc(1 - var(--sanity-desat, 0)));
   transition: filter 0.6s ease;
 }
+body.is-touch #app { filter: none !important; }
+body.is-touch #grain-overlay { display: none !important; }
 #app.sanity-shaken   { --sanity-hue: -4deg; --sanity-desat: 0.1; }
 #app.sanity-low      { --sanity-hue: -8deg; --sanity-blur: 0.4px; --sanity-desat: 0.25; }
 #app.sanity-critical { --sanity-hue: -14deg; --sanity-blur: 1px; --sanity-desat: 0.45; }

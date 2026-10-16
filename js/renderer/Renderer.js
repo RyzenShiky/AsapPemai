@@ -5,7 +5,7 @@ import { WORLD, tileSeed, ROADS, onRoad, RIVER, LANDMARKS, sample } from '../cor
 import { buildLampSites, lampLevel } from '../core/StreetLamps.js';
 import { MONSTER_TYPES, ROSTER } from '../core/MonsterTypes.js';
 import { VEHICLE_FACE } from '../gameplay/Vehicle.js';
-import { BUILDING_DEFS, nearBuilding } from '../core/Buildings.js';
+import { BUILDING_DEFS, nearBuilding, BILLBOARD, TV_HOUSES } from '../core/Buildings.js';
 import { recommendGraphics } from '../core/Device.js';
 import { groundHeight } from '../core/Collision.js';
 
@@ -24,6 +24,11 @@ export class Renderer {
     this.vehicleModels = {};
     this.vehicleMeshes = {};
     this.billboardMesh = null;
+    this.screenMats = [];
+    this._screenTex = null;
+    this._screenVideo = null;
+    this.tvSpots = [];
+    this.tvLights = [];
     this._lastBillboardUrl = null;
     this.throwables = [];
     this.rainMesh = null;
@@ -164,13 +169,7 @@ export class Renderer {
       } catch (e) {
         console.warn('Vehicle models', e);
       }
-      // Billboard plane (world)
-      const bbGeo = new THREE.PlaneGeometry(12, 7);
-      const bbMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9, side: THREE.DoubleSide });
-      this.billboardMesh = new THREE.Mesh(bbGeo, bbMat);
-      this.billboardMesh.position.set(30, 5, -80);
-      this.billboardMesh.rotation.y = Math.PI * 0.15;
-      this.scene.add(this.billboardMesh);
+      // billboard built in buildBillboard()
       this.playerTemplate.traverse((c) => {
         if (c.isMesh) {
           c.castShadow = gfx.shadows;
@@ -186,7 +185,9 @@ export class Renderer {
     this.buildRoads();
     this.buildRiver();
     this.buildLandmarks();
+    this.buildBillboard();
     this.buildLamps(buildLampSites(), gfx);
+    this._initTVLights(gfx);
 
     // Heavy monsters load in background; await renderer.monstersReady before start
     this.monstersReady = (async () => {
@@ -452,9 +453,7 @@ export class Renderer {
       const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), matEye);
       eye.position.set(side * 0.16, 2.28, 0.38);
       g.add(eye);
-      const glow = new THREE.PointLight(0xddeeff, 0.45, 3.5, 2);
-      glow.position.copy(eye.position);
-      g.add(glow);
+      // no PointLight on eyes — avoids shader recompile when monsters toggle
     }
 
     // Legs
@@ -521,6 +520,8 @@ export class Renderer {
   }
 
   _updateNameSprite(spr, name) {
+    if (spr.userData.name === name) return;
+    spr.userData.name = name;
     const ctx = spr.userData.ctx;
     const canvas = spr.userData.canvas;
     if (!ctx) return;
@@ -658,35 +659,30 @@ export class Renderer {
   }
 
   applyBillboardMedia(data, audio) {
-    if (!this.billboardMesh || !data || !data.url) return;
+    if (!data || !data.url) return;
     if (data.url === this._lastBillboardUrl) return;
     this._lastBillboardUrl = data.url;
-    const pos = this.billboardMesh.position;
-    if (data.type === 'image') {
+    if (data.type === 'image' || !data.type) {
       new THREE.TextureLoader().load(data.url, (tex) => {
         if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
-        const m = this.billboardMesh.material;
-        m.map = tex;
-        m.emissiveMap = tex;
-        m.color.setHex(0xffffff);
-        m.emissive.setHex(0xffffff);
-        m.emissiveIntensity = 0.85;
-        m.needsUpdate = true;
+        this._setScreens(tex);
       });
     } else if (data.type === 'video') {
+      this._screenVideo?.pause();
       const video = document.createElement('video');
       video.src = data.url;
       video.crossOrigin = 'anonymous';
       video.loop = true;
-      video.muted = true; // autoplay policy; user can unmute via UI later
+      video.muted = true;
       video.playsInline = true;
       video.play().catch(() => {});
+      this._screenVideo = video;
       const tex = new THREE.VideoTexture(video);
-      this.billboardMesh.material.map = tex;
-      this.billboardMesh.material.color.setHex(0xffffff);
-      this.billboardMesh.material.needsUpdate = true;
-    } else if (data.type === 'audio' && audio) {
-      audio.playPositionalFile(data.url, { x: pos.x, y: pos.y, z: pos.z });
+      if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+      this._setScreens(tex);
+    } else if (data.type === 'audio' && audio && this.billboardMesh) {
+      const p = this.billboardMesh.getWorldPosition(new THREE.Vector3());
+      audio.playPositionalFile?.(data.url, { x: p.x, y: p.y, z: p.z });
     }
   }
 
@@ -851,12 +847,8 @@ export class Renderer {
         roof.castShadow = this.gfx.shadows;
         g.add(roof);
       }
-
-      // Dim interior bulb
-      const bulb = new THREE.PointLight(0xffcc88, 0.35, Math.max(w, d) * 1.2, 2);
-      bulb.position.set(0, h * 0.7, 0);
-      g.add(bulb);
-
+      // interior light pooled elsewhere
+      this._addTV(g, def);
       this.buildingGroup.add(g);
     }
   }
@@ -1039,6 +1031,130 @@ export class Renderer {
   tickWorldFx(dt) {
     this._fxT = (this._fxT || 0) + dt;
     if (this._circleMat) this._circleMat.opacity = 0.5 + 0.15 * Math.sin(this._fxT * 1.7);
+  }
+
+
+  _noSignalTexture() {
+    if (this._noSig) return this._noSig;
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 288;
+    const g = c.getContext('2d');
+    ['#c8c8c8', '#c8c800', '#00c8c8', '#00c800', '#c800c8', '#c80000', '#0000c8'].forEach((col, i) => {
+      g.fillStyle = col;
+      g.fillRect((i * 512) / 7, 0, 512 / 7 + 1, 288);
+    });
+    g.fillStyle = 'rgba(0,0,0,0.7)';
+    g.fillRect(0, 0, 512, 288);
+    g.fillStyle = '#9fb0c0';
+    g.font = 'bold 34px monospace';
+    g.textAlign = 'center';
+    g.fillText('NO SIGNAL', 256, 154);
+    const tex = new THREE.CanvasTexture(c);
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    return (this._noSig = tex);
+  }
+
+  _makeScreenMat() {
+    const m = new THREE.MeshBasicMaterial({
+      map: this._screenTex || this._noSignalTexture(),
+      color: this._screenTex ? 0xffffff : 0x6a7480,
+    });
+    this.screenMats.push(m);
+    return m;
+  }
+
+  _setScreens(tex) {
+    this._screenTex = tex;
+    for (const m of this.screenMats) {
+      m.map = tex;
+      m.color.setHex(0xffffff);
+      m.needsUpdate = true;
+    }
+  }
+
+  buildBillboard() {
+    if (typeof BILLBOARD === 'undefined') return;
+    const B = BILLBOARD;
+    const cy = B.base + B.h / 2;
+    const g = new THREE.Group();
+    g.position.set(B.x, groundHeight(B.x, B.z), B.z);
+    g.rotation.y = B.yaw;
+    const steel = new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.7, metalness: 0.4 });
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(B.w + 1.4, B.h + 1.4, 0.7), steel);
+    frame.position.set(0, cy, -0.4);
+    g.add(frame);
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(B.w, B.h), this._makeScreenMat());
+    screen.position.set(0, cy, 0.01);
+    g.add(screen);
+    for (const sx of [-0.3, 0.3]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, cy, 8), steel);
+      post.position.set(sx * B.w, cy / 2, -0.4);
+      g.add(post);
+    }
+    this.scene.add(g);
+    this.billboardMesh = screen;
+  }
+
+  _addTV(g, def) {
+    if (typeof TV_HOUSES === 'undefined' || !TV_HOUSES.includes(def.id)) return;
+    const { w, d, door } = def;
+    const TW = 1.7, TH = 0.96, Y = 1.45, IN = 0.35;
+    const map = {
+      s: [0, -d / 2 + IN, 0],
+      n: [0, d / 2 - IN, Math.PI],
+      e: [-w / 2 + IN, 0, Math.PI / 2],
+      w: [w / 2 - IN, 0, -Math.PI / 2],
+    };
+    const [px, pz, yaw] = map[door] || map.s;
+    const tv = new THREE.Group();
+    tv.position.set(px, Y, pz);
+    tv.rotation.y = yaw;
+    const dark = new THREE.MeshStandardMaterial({ color: 0x0c0c0e, roughness: 0.6 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(TW + 0.12, TH + 0.12, 0.12), dark);
+    body.position.z = -0.07;
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(TW, TH), this._makeScreenMat());
+    scr.position.z = 0.001;
+    tv.add(body, scr);
+    g.add(tv);
+    this.tvSpots.push({
+      x: def.x + px + Math.sin(yaw) * 0.9,
+      y: 1.4,
+      z: def.z + pz + Math.cos(yaw) * 0.9,
+    });
+  }
+
+  _initTVLights(gfx) {
+    const n = gfx?.touch ? 1 : 2;
+    this.tvLights = Array.from({ length: n }, () => {
+      const l = new THREE.PointLight(0x8fb4ff, 0, 7, 2);
+      this.scene.add(l);
+      return l;
+    });
+    this._tvNear = [];
+    this._tvA = 0;
+    this._tvT = 0;
+  }
+
+  updateTVLights(px, pz, dt) {
+    if (!this.tvLights?.length) return;
+    this._tvT += dt;
+    this._tvA += dt;
+    if (this._tvA > 0.25) {
+      this._tvA = 0;
+      const d = (s) => Math.hypot(s.x - px, s.z - pz);
+      this._tvNear = this.tvSpots
+        .filter((s) => d(s) < 14)
+        .sort((a, b) => d(a) - d(b))
+        .slice(0, this.tvLights.length);
+    }
+    const base = this._screenTex ? 1.8 : 0.6;
+    this.tvLights.forEach((l, k) => {
+      const s = this._tvNear[k];
+      if (s) l.position.set(s.x, s.y, s.z);
+      const flick = 0.85 + 0.15 * Math.sin(this._tvT * 13 + k * 1.7) * Math.sin(this._tvT * 5.3);
+      const target = s ? base * flick : 0;
+      l.intensity += (target - l.intensity) * Math.min(1, dt * 8);
+    });
   }
 
   resize(w, h) {

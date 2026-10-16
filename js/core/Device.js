@@ -25,7 +25,7 @@ export function recommendGraphics() {
     touch,
     lowEnd: low,
     pixelRatioCap: low ? 0.9 : touch ? 1.0 : 1.5,
-    shadows: !touch,
+    shadows: false,
     fogDensity: touch ? 0.03 : 0.022,
     foliageScale: low ? 0.3 : touch ? 0.45 : 1.0,
     maxRain: low ? 40 : touch ? 80 : 280,

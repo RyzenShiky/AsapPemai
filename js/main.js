@@ -1325,6 +1325,11 @@ function startLoop() {
       state._lampSites = renderer.lampSites;
       renderer.updateLamps(state.data.world.elapsed, dayProgress, state.data.player.position.x, state.data.player.position.z, dt);
     }
+    renderer?.updateTVLights?.(
+      state.data.player.position.x,
+      state.data.player.position.z,
+      dt
+    );
     state.data.world.daysSurvived = dayIndex;
     state.data.progress.daysReached = dayIndex;
     state.data.world.timeOfDay = dayProgress;
