@@ -40,17 +40,21 @@ function forestOcclusion(from, to) {
     density += tileSeed(tx, tz, 7);
   }
   density /= samples;
-  return Math.max(0.3, 1 - density * 0.55);
+  return Math.max(0.5, 1 - density * 0.35);
 }
+
+const HEAR_RANGE = 1.35;
+const HEAR_GAIN = 1.3;
 
 export function processHearing(monster, events, now, suspicion, weatherMul = 1) {
   const heard = [];
   for (const ev of events) {
     const dist = distance(monster.position, ev.position);
-    if (dist > ev.radius) continue;
-    const atten = Math.max(0, 1 - dist / ev.radius);
+    const R = ev.radius * HEAR_RANGE;
+    if (dist > R) continue;
+    const atten = Math.max(0, 1 - dist / R);
     const occ = forestOcclusion(ev.position, monster.position);
-    const perceived = ev.intensity * atten * occ * weatherMul;
+    const perceived = ev.intensity * HEAR_GAIN * atten * occ * weatherMul;
     if (perceived < 0.05) continue;
 
     heard.push(ev);

@@ -159,6 +159,9 @@ window.addEventListener('error', function (e) {
           <span id="pill-breath" class="pill hidden">BREATH</span>
           <span id="pill-throw" class="pill">×2</span>
         </div>
+        <button id="btn-chat" type="button" style="position:absolute;top:.5rem;right:3.6rem;z-index:30;pointer-events:auto;min-width:0;padding:.4rem .55rem">💬</button>
+        <div id="chat-log"></div>
+        <input id="chat-input" class="hidden" maxlength="120" placeholder="Chat… (Enter kirim, Esc batal)" autocomplete="off" />
         <div id="room-hud" class="hidden"></div>
       </div>
 
@@ -185,6 +188,7 @@ window.addEventListener('error', function (e) {
           <div data-action="flash">Flashlight: <button class="btn-bind" type="button">—</button></div>
           <div data-action="hide">Hide: <button class="btn-bind" type="button">—</button></div>
           <div data-action="throw">Throw: <button class="btn-bind" type="button">—</button></div>
+          <div data-action="lighter">Lighter: <button class="btn-bind" type="button">—</button></div>
           <div data-action="interact">Interact: <button class="btn-bind" type="button">—</button></div>
         </div>
         <button id="btn-reset-binds" class="btn" type="button">Reset Keys</button>
@@ -213,7 +217,7 @@ window.addEventListener('error', function (e) {
     <button id="bb-close" class="btn" type="button">Close</button>
     <p id="bb-status" class="subtitle"></p>
   </div>
-  <script type="module" src="./js/main.js?v=5.6"></script>
+  <script type="module" src="./js/main.js?v=5.9.1"></script>
 <div id="toast" class="hidden" style="position:fixed;bottom:12%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#eee;padding:.6rem 1.2rem;border-radius:6px;z-index:10000;font-size:.9rem;max-width:90%;text-align:center"></div>
 </body>
 </html>

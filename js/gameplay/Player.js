@@ -52,6 +52,7 @@ export class PlayerController {
         }
       }
       if (e.code === binds.hide) this.toggleHide();
+      if (e.code === binds.lighter) this.toggleLighter();
       if (e.code === binds.throw) this.throwDistraction();
     }, opt);
 
@@ -86,6 +87,13 @@ export class PlayerController {
   /** Helper: is the given action currently held? */
   _down(action) {
     return this.keys.has(binds[action]);
+  }
+
+  toggleLighter() {
+    const p = this.state.data.player;
+    if (!p || (!this.lighterOn && (p.lighterFuel ?? 100) <= 0)) return;
+    this.lighterOn = !this.lighterOn;
+    p.lighter = this.lighterOn;
   }
 
   toggleHide() {
@@ -161,6 +169,11 @@ export class PlayerController {
     if (!p.alive) return;
     this._flushLook();
     p.flashlight = this.flashlightOn;
+    if (this.lighterOn) {
+      p.lighterFuel = Math.max(0, (p.lighterFuel ?? 100) - dt * 0.4);
+      if (p.lighterFuel <= 0) this.lighterOn = false;
+    }
+    p.lighter = this.lighterOn;
 
     // Battery: slow drain when on (~14 min full); tiny recharge when off
     if (this.flashlightOn) {
@@ -196,6 +209,11 @@ export class PlayerController {
             : (vData.seatOffsets?.PassengerSeat ||
                vData.seatOffsets?.PassengerSeatFront ||
                { x: 0, y: 1, z: -0.4 });
+        if (role === 'driver') {
+          const last = this._lastV;
+          if (last && last.id === vData.id) p.rotation.yaw += vData.rotation.yaw - last.yaw;
+          this._lastV = { id: vData.id, yaw: vData.rotation.yaw };
+        }
         const w = seatToWorld(vData, seatLocal);
         p.position.x = w.x;
         p.position.y = w.y;
@@ -205,6 +223,8 @@ export class PlayerController {
         return;
       }
     }
+
+    this._lastV = null;
 
     // Downed: crawl only, countdown to death
     if (p.isDowned) {

@@ -13,7 +13,7 @@ export function buildColliders() {
       const ox = -half + tx * ts + ts * 0.5;
       const oz = -half + tz * ts + ts * 0.5;
       // slightly fewer trees per tile on larger map
-      const treeCount = 6 + Math.floor(tileSeed(tx, tz, 0) * 5);
+      const treeCount = 2 + Math.floor(tileSeed(tx, tz, 0) * 3);
       for (let i = 0; i < treeCount; i++) {
         const sx = tileSeed(tx, tz, i * 3 + 1);
         const sz = tileSeed(tx, tz, i * 3 + 2);

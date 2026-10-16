@@ -9,6 +9,7 @@ const DEFAULTS = {
   hide: 'KeyH',
   throw: 'KeyQ',
   interact: 'KeyE',
+  lighter: 'KeyG',
 };
 
 export const binds = {

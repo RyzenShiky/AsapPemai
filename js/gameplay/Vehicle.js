@@ -99,10 +99,14 @@ export class VehicleController {
     if (this.driverUid !== myUid) return;
 
     const down = (codes) => codes.some((c) => keys.has(c));
-    const turn = (down(['KeyA', 'ArrowLeft']) ? 1 : 0) - (down(['KeyD', 'ArrowRight']) ? 1 : 0);
-    const throttle = (down(['KeyW', 'ArrowUp']) ? 1 : 0) - (down(['KeyS', 'ArrowDown']) ? 1 : 0);
+    const ax = keys.axis;
+    const dead = 0.15;
+    const f = (v) => (Math.abs(v) < dead ? 0 : (Math.sign(v) * (Math.abs(v) - dead)) / (1 - dead));
+    const useAx = ax && (Math.abs(ax.x) > dead || Math.abs(ax.y) > dead);
+    const turn = useAx ? -f(ax.x) : (down(['KeyA', 'ArrowLeft']) ? 1 : 0) - (down(['KeyD', 'ArrowRight']) ? 1 : 0);
+    const throttle = useAx ? -f(ax.y) : (down(['KeyW', 'ArrowUp']) ? 1 : 0) - (down(['KeyS', 'ArrowDown']) ? 1 : 0);
     const maxSpd = this.type === 'motor' ? 9 : 14;
-    const turnRate = this.type === 'motor' ? 2.2 : 1.3;
+    const turnRate = this.type === 'motor' ? 1.8 : 1.0;
 
     this.targetSpeed = throttle * maxSpd;
     this.speed += (this.targetSpeed - this.speed) * Math.min(1, 3 * dt);

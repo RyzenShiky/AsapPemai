@@ -1,5 +1,5 @@
-const SUSPICION_GAIN = 80;
-const MAX_PER_SOUND = 40;
+const SUSPICION_GAIN = 100;
+const MAX_PER_SOUND = 50;
 
 export class SuspicionSystem {
   constructor() {
@@ -16,7 +16,7 @@ export class SuspicionSystem {
 
   /** Continuous decay — feels alive */
   update(dt) {
-    const rate = this.value > 60 ? 4.5 : this.value > 30 ? 6 : 8;
+    const rate = this.value > 60 ? 3.5 : this.value > 30 ? 5 : 6.5;
     this.value = Math.max(0, this.value - rate * dt);
   }
 

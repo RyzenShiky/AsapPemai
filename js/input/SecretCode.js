@@ -19,6 +19,9 @@ export function installSecretCodes(handlers) {
     } else if (low.endsWith('mobil')) {
       handlers.onMobil?.();
       buffer = '';
+    } else if (low.endsWith('monster')) {
+      handlers.onMonster?.();
+      buffer = '';
     }
   };
   window.addEventListener('keydown', onKey);

@@ -17,6 +17,7 @@ import { WorldDirector } from './core/WorldDirector.js';
 import { WeatherController } from './core/Weather.js';
 import { updateSchedule } from './core/MonsterSchedule.js';
 import { ROSTER, MAX_PLAYERS } from './core/MonsterTypes.js';
+import { LevelManager, LEVELS } from './core/Level.js';
 import { weatherMul, weatherSpeed, weatherVis } from './core/Weather.js';
 import { DreadSequencer } from './audio/DreadSequencer.js';
 import { installSecretCodes } from './input/SecretCode.js';
@@ -48,6 +49,7 @@ let worldDirector = null;
 let hallu = null;
 let weatherCtrl = new WeatherController();
 let hearingMask = 1;
+let level = null;
 const claimedPickups = new Map();
 const appliedPickups = new Set();
 
@@ -58,6 +60,18 @@ function toast(msg, ms = 3500) {
   el.classList.remove('hidden');
   clearTimeout(toast._t);
   toast._t = setTimeout(() => el.classList.add('hidden'), ms);
+}
+
+async function imageToDataUrl(file, max = 768) {
+  const bmp = await createImageBitmap(file);
+  const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * k);
+  c.height = Math.round(bmp.height * k);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  let q = 0.8, url = c.toDataURL('image/jpeg', q);
+  while (url.length > 180000 && q > 0.3) url = c.toDataURL('image/jpeg', (q -= 0.1));
+  return url;
 }
 
 function givePickupItem(pk) {
@@ -100,6 +114,12 @@ async function init() {
   window.__wallsOnly = buildSpatialGrid(_rawCol.filter((c) => c.type === 'wall'));
   renderer = new Renderer();
   await renderer.init(canvas);
+  const lv = new URLSearchParams(location.search).get('level');
+  if (LEVELS[lv]) {
+    level = new LevelManager(renderer, lv);
+    colliders = level.spatial;
+    window.__wallsOnly = level.spatial;
+  }
 
   const onResize = () => renderer.resize(canvas.clientWidth, canvas.clientHeight);
   window.addEventListener('resize', onResize);
@@ -112,6 +132,10 @@ async function init() {
     },
     onMotor: () => spawnVehicle('motor'),
     onMobil: () => spawnVehicle('mobil'),
+    onMonster: () => {
+      if (room && !room.isHost) return;
+      if (state) state._forceMonsters = !state._forceMonsters;
+    },
   });
   document.getElementById('bb-close')?.addEventListener('click', () => {
     document.getElementById('billboard-panel')?.classList.remove('open');
@@ -128,8 +152,9 @@ async function init() {
         if (st) st.textContent = 'Hanya host yang boleh upload';
         return;
       }
-      const type = file.type.startsWith('video') ? 'video' : file.type.startsWith('audio') ? 'audio' : 'image';
-      const url = await uploadBillboardMedia(file, code);
+      if (!file.type.startsWith('image/')) { if (st) st.textContent = 'Hanya gambar'; return; }
+      const type = 'image';
+      const url = await imageToDataUrl(file);
       if (room) await room.setBillboard(url, type);
       else if (renderer) renderer.applyBillboardMedia({ url, type }, audio);
       if (st) st.textContent = 'OK';
@@ -309,6 +334,7 @@ async function setupLocalGame(fromSave = false) {
   }
   touch.onHide = () => player.toggleHide();
   touch.onThrowBtn = () => player.throwDistraction();
+  touch.onLighterToggle = () => player?.toggleLighter?.();
   touch.onFlashToggle = () => {
     const bat = state.data.player?.battery ?? 100;
     if (!player.flashlightOn && bat <= 0) {
@@ -363,7 +389,33 @@ function renderLobbyPlayers() {
   }
 }
 
+function addChat(m) {
+  const log = document.getElementById('chat-log');
+  if (!log) return;
+  const d = document.createElement('div');
+  d.textContent = (m.name || '?') + ': ' + (m.text || '');
+  log.appendChild(d);
+  while (log.children.length > 6) log.firstChild.remove();
+  setTimeout(() => d.remove(), 12000);
+}
+function openChat() {
+  const i = document.getElementById('chat-input');
+  if (!room || !i) return;
+  document.exitPointerLock?.();
+  i.classList.remove('hidden');
+  i.focus();
+}
+function closeChat() {
+  const i = document.getElementById('chat-input');
+  if (!i) return;
+  i.value = '';
+  i.classList.add('hidden');
+  i.blur();
+  document.getElementById('game-canvas')?.focus();
+}
+
 function enterLobby() {
+  if (room) room.onChat = addChat;
   document.getElementById('lobby-code').textContent = room.code;
   document.getElementById('multi-screen').classList.add('hidden');
   document.getElementById('lobby-screen').classList.remove('hidden');
@@ -515,6 +567,23 @@ function wireUI(canvas) {
     settingsFromGame = true;
     if (typeof touch !== 'undefined' && touch) touch.hide();
     document.getElementById('btn-settings').click();
+  });
+
+  window.addEventListener('keydown', (e) => {
+    const i = document.getElementById('chat-input');
+    if (e.code === 'Enter' && running && i && document.activeElement !== i) {
+      e.preventDefault();
+      openChat();
+    }
+  });
+  document.getElementById('btn-chat')?.addEventListener('click', openChat);
+  document.getElementById('chat-input')?.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Escape') return closeChat();
+    if (e.key !== 'Enter') return;
+    const txt = e.target.value.trim();
+    if (txt && room) room.sendChat(txt, profile.displayName);
+    closeChat();
   });
 
   document.getElementById('btn-settings').addEventListener('click', () => {
@@ -674,6 +743,19 @@ function wireUI(canvas) {
   });
 
   document.getElementById('btn-restart').addEventListener('click', async () => {
+    if (room && mode === 'multi' && !room.gameStatus?.gameOver) {
+      await room.respawnSelf();
+      const p = state.data.player;
+      Object.assign(p, { alive: true, isDowned: false, health: 100, downedTimer: 0, sanity: 100 });
+      p.position.x = 0; p.position.y = 1.7; p.position.z = 8;
+      state.data.progress.gameOver = false;
+      document.getElementById('gameover-screen')?.classList.add('hidden');
+      document.getElementById('hud')?.classList.remove('hidden');
+      if (touch && inputMode() === 'touch') touch.show();
+      document.getElementById('game-canvas')?.focus();
+      startLoop();
+      return;
+    }
     document.getElementById('gameover-screen').classList.add('hidden');
     running = false;
     hideTouch();
@@ -706,6 +788,9 @@ function wireUI(canvas) {
 }
 
 function showGameOver(win) {
+  const rb = document.getElementById('btn-restart');
+  if (rb) rb.textContent = (mode === 'multi' && room && !room.gameStatus?.gameOver) ? 'RESPAWN' : 'RESTART';
+
   running = false;
   hideTouch();
   document.exitPointerLock?.();
@@ -920,6 +1005,7 @@ function startLoop() {
 
     player.update(dt);
     tryVehicleInteract();
+    level?.update(state.data.player.position, dt, state.data.player, audio);
 
     // Vehicle physics (local driver or host)
     const myUid = room?.uid || deviceUid();
@@ -1150,7 +1236,7 @@ function startLoop() {
     state.data.progress.daysReached = dayIndex;
     state.data.world.timeOfDay = dayProgress;
     const lights = lightingForProgress(dayProgress);
-    if (renderer.applyDayLighting) renderer.applyDayLighting(lights);
+    if (!level && renderer.applyDayLighting) renderer.applyDayLighting(lights);
     const phase = phaseFromProgress(dayProgress);
     const timerEl = document.getElementById('match-timer');
     if (timerEl) {
@@ -1345,7 +1431,7 @@ function startLoop() {
     updateProximityUI(mDist);
     tickHeartbeat(dt, bpm, danger);
     const inside = isInsideBuilding(state.data.player.position.x, state.data.player.position.z);
-    const isDarkOutside = !inside && !state.data.player.flashlight && phase !== 'afternoon';
+    const isDarkOutside = !inside && !state.data.player.flashlight && !state.data.player.lighter && phase !== 'afternoon';
     tickSanity(dt, mDist, isDarkOutside);
     tickJumpscare(dt, mDist, nearestMon ? nearestMon.aiState : null);
 

@@ -30,6 +30,7 @@ export class TouchControls {
         <button type="button" id="touch-hide" aria-label="Hide">HIDE</button>
         <button type="button" id="touch-throw" aria-label="Throw">THROW</button>
         <button type="button" id="touch-flash" aria-label="Flashlight">LIGHT</button>
+      <button type="button" id="touch-lighter">KOREK</button>
         <button type="button" id="touch-crouch" aria-label="Crouch">CROUCH</button>
         <button type="button" id="touch-run" aria-label="Run">RUN</button>
         <button type="button" id="touch-revive" aria-label="Revive">E</button>
@@ -43,6 +44,7 @@ export class TouchControls {
     this.lookZone = this.el.querySelector('#touch-look-zone');
     this.btnRun = this.el.querySelector('#touch-run');
     this.btnCrouch = this.el.querySelector('#touch-crouch');
+    this.btnLighter = this.el.querySelector('#touch-lighter');
     this.btnFlash = this.el.querySelector('#touch-flash');
     this.btnHide = this.el.querySelector('#touch-hide');
     this.btnThrow = this.el.querySelector('#touch-throw');
@@ -151,6 +153,10 @@ export class TouchControls {
       this.keys.delete('KeyE');
       this.btnRevive.classList.remove('active');
     });
+    this.btnLighter?.addEventListener('touchstart', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      this.onLighterToggle?.();
+    }, { passive: false });
     this.btnFlash.addEventListener(
       'touchstart',
       (e) => {
@@ -213,6 +219,7 @@ export class TouchControls {
       if (t.identifier === this._joyId) {
         this._joyId = null;
         this._clearMoveKeys();
+        this.keys.axis = null;
         this.knob.style.transform = 'translate(0px, 0px)';
       }
       if (t.identifier === this._lookId) {
@@ -240,6 +247,7 @@ export class TouchControls {
     if (ny > dead) this.keys.add('KeyS');
     if (nx < -dead) this.keys.add('KeyA');
     if (nx > dead) this.keys.add('KeyD');
+    this.keys.axis = { x: nx, y: ny };
   }
 
   _clearMoveKeys() {
@@ -250,6 +258,7 @@ export class TouchControls {
   }
 
   _releaseAll() {
+    this.keys.axis = null;
     this._joyId = null;
     this._lookId = null;
     this._clearMoveKeys();

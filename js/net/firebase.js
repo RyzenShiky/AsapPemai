@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js';
 import {
-  getDatabase, ref, set, update, onValue, onDisconnect, get, remove,
+  getDatabase, ref, set, update, onValue, onDisconnect, get, remove, push, onChildAdded, query, limitToLast,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js';
 import {
   getStorage, ref as sRef, uploadBytes, getDownloadURL,
@@ -220,9 +220,38 @@ export class MultiplayerRoom {
       if (typeof this.onUpdate === 'function') this.onUpdate();
     });
     this.unsubs.push(() => unsub());
+    this._chatFrom = this.serverNow() - 15000;
+    try {
+      const cu = onChildAdded(
+        query(ref(this.db, `rooms/${this.code}/chat`), limitToLast(30)),
+        (s) => {
+          const m = s.val();
+          if (m && m.t >= this._chatFrom && this.onChat) this.onChat(m);
+        }
+      );
+      this.unsubs.push(() => cu());
+    } catch (e) { /* */ }
   }
 
   /** Client-owned fields only; host also writes own health/alive. Uses update() so host damage is not clobbered. */
+  respawnSelf() {
+    return update(ref(this.db, `rooms/${this.code}/players/${this.uid}`), {
+      alive: true, isDowned: false, health: 100, downedTimer: 0,
+      x: 0, y: 1.7, z: 8 + Math.random() * 2,
+    });
+  }
+
+  sendChat(text, name) {
+    if (Date.now() - (this._lc || 0) < 800) return Promise.resolve();
+    this._lc = Date.now();
+    return push(ref(this.db, `rooms/${this.code}/chat`), {
+      uid: this.uid,
+      name: String(name || 'Player').slice(0, 16),
+      text: String(text).slice(0, 120),
+      t: Date.now(),
+    });
+  }
+
   writePlayer(player) {
     const prev = this.remotePlayers[this.uid] || {};
     const eyeY = player.position.y;
@@ -238,6 +267,8 @@ export class MultiplayerRoom {
       ridingRole: player.ridingRole || null,
       name: prev.name || 'Player_' + this.uid.slice(-4),
       joinedAt: prev.joinedAt || Date.now(),
+      fl: !!player.flashlight,
+      pitch: +(player.rotation.pitch || 0).toFixed(2),
     };
     if (this.isHost || !this.remotePlayers[this.uid]) {
       Object.assign(own, {

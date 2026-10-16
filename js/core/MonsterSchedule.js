@@ -24,23 +24,39 @@ function pickSpawn(players) {
     );
     if (ok) return { x, y: 0, z };
   }
+  // fallback: ignore "behind player" requirement
+  for (let k = 0; k < 24; k++) {
+    const b = players[(Math.random() * players.length) | 0];
+    const a = Math.random() * 6.283;
+    const r = 50 + Math.random() * 60;
+    const x = b.x + Math.cos(a) * r;
+    const z = b.z + Math.sin(a) * r;
+    if (Math.abs(x) > 195 || Math.abs(z) > 195) continue;
+    if (players.every((p) => Math.hypot(p.x - x, p.z - z) >= 40)) return { x, y: 0, z };
+  }
   return null;
 }
 
 /**
  * Host/solo only. Activates roster monsters at night, despawns at dawn.
- * @param {object[]} players [{x,z,yaw}, ...] local + living remotes
  */
 export function updateSchedule(state, players, dayP, dayIndex) {
-  const cap = Math.min(ROSTER.length, 2 + Math.floor(players.length / 2));
+  const force = !!state._forceMonsters;
+  const cap = force
+    ? ROSTER.length
+    : Math.min(ROSTER.length, 3 + Math.floor(players.length / 2));
   const ranked = ROSTER.map((_, i) => [rnd(dayIndex, i), i]).sort((a, b) => a[0] - b[0]);
   const tonight = new Set(ranked.slice(0, cap).map((x) => x[1]));
 
   state.data.monsters.forEach((m, i) => {
     const cfg = MONSTER_TYPES[ROSTER[i]] || MONSTER_TYPES.shadow;
-    const want = tonight.has(i) && dayP >= cfg.nightAt && dayP < 0.9;
+    const want = force || (tonight.has(i) && dayP >= cfg.nightAt && dayP < 0.9);
     if (want && !m.active) {
-      const p = pickSpawn(players);
+      const p =
+        pickSpawn(players) ||
+        (force && players[0]
+          ? { x: players[0].x + 45, y: 0, z: players[0].z }
+          : null);
       if (p) {
         m.active = true;
         m.aiState = 'PATROL';

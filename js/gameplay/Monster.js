@@ -50,6 +50,34 @@ export class MonsterController {
     this.room = room;
   }
 
+  /** Nearest living player (host + remotes), with hysteresis. */
+  _pickTarget(m) {
+    const me = this.state.data.player;
+    const list = [];
+    if (me.alive !== false)
+      list.push({ uid: 'me', pos: me.position, hiding: !!me.isHiding, flash: !!me.flashlight || !!me.lighter });
+    if (this.room?.isHost && this.room.remotePlayers) {
+      for (const [uid, rp] of Object.entries(this.room.remotePlayers)) {
+        if (uid === this.room.uid || rp.alive === false) continue;
+        list.push({
+          uid,
+          pos: { x: rp.x, y: rp.y ?? 1.7, z: rp.z },
+          hiding: false,
+          flash: !!rp.fl,
+        });
+      }
+    }
+    if (!list.length) return { uid: 'me', pos: me.position, hiding: false, flash: false };
+    let best = null, bd = Infinity;
+    for (const tg of list) {
+      let d = Math.hypot(m.position.x - tg.pos.x, m.position.z - tg.pos.z);
+      if (tg.uid === this._tgtUid) d -= 8;
+      if (d < bd) { bd = d; best = tg; }
+    }
+    this._tgtUid = best.uid;
+    return best;
+  }
+
   _frenzyMul(m) {
     const sus = m.memory.suspicion || 0;
     const intens = m.memory.lastHeardIntensity || 0;
@@ -93,7 +121,8 @@ export class MonsterController {
           : 1;
     const weatherMulClamped = Math.max(0.6, weatherMul) * (this.state._hearingMask ?? 1) * (this.cfg.sense?.hear ?? this.cfg.hearMul ?? 1);
 
-    const ppos = this.state.data.player.position;
+    const tgt = this._pickTarget(m);
+    const ppos = tgt.pos;
     const distP = Math.hypot(m.position.x - ppos.x, m.position.z - ppos.z);
 
     // Vision check ~5×/sec
@@ -107,7 +136,8 @@ export class MonsterController {
             ? 0.8
             : 1;
       const sense = this.cfg.sense || {};
-      const range = this.state.data.player.isHiding ? 7 : (sense.sightRange ?? 28);
+      let range = tgt.hiding ? 7 : (sense.sightRange ?? 28);
+      if (tgt.flash) range *= 1.25;
       const fov = sense.fov ?? 1.9;
       const lampSites = this.state._lampSites || null;
       m.memory.canSeePlayer = canSee(m, ppos, this.colliders, { light, range, fov, lampSites });
@@ -270,6 +300,7 @@ export class MonsterController {
         });
       }
     }
+    targets.sort((a, b) => Math.hypot(m.position.x - a.pos.x, m.position.z - a.pos.z) - Math.hypot(m.position.x - b.pos.x, m.position.z - b.pos.z));
     for (const t of targets) {
       // Require open line (no thin-wall punches)
       if (

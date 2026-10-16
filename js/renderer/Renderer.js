@@ -77,6 +77,35 @@ export class Renderer {
     this.scene.add(this.flashlight);
     this.flashlightFill = new THREE.PointLight(0xffe8c8, 0, 8, 2);
     this.scene.add(this.flashlightFill);
+    this.lighterLight = new THREE.PointLight(0xff9a3c, 0, 10, 2);
+    this.scene.add(this.lighterLight);
+
+    // Pool of remote flashlights (fixed count — avoids shader recompile on join/leave)
+    const nRemote = gfx.lowEnd ? 2 : 5;
+    this.remoteLights = Array.from({ length: nRemote }, () => {
+      const l = new THREE.SpotLight(0xfff4e0, 0, 40, Math.PI / 5, 0.3, 1.0);
+      l.castShadow = false;
+      this.scene.add(l);
+      this.scene.add(l.target);
+      let beam = null;
+      if (!gfx.lowEnd) {
+        beam = new THREE.Mesh(
+          new THREE.ConeGeometry(2.6, 14, 16, 1, true).translate(0, -7, 0).rotateX(Math.PI / 2),
+          new THREE.MeshBasicMaterial({
+            color: 0xfff4e0,
+            transparent: true,
+            opacity: 0.06,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+          })
+        );
+        beam.visible = false;
+        beam.frustumCulled = false;
+        this.scene.add(beam);
+      }
+      return { l, beam, uid: null };
+    });
 
     const groundGeo = new THREE.PlaneGeometry(WORLD.size, WORLD.size, gfx.touch ? 24 : 48, gfx.touch ? 24 : 48);
     const pos = groundGeo.attributes.position;
@@ -632,9 +661,14 @@ export class Renderer {
     const pos = this.billboardMesh.position;
     if (data.type === 'image') {
       new THREE.TextureLoader().load(data.url, (tex) => {
-        this.billboardMesh.material.map = tex;
-        this.billboardMesh.material.color.setHex(0xffffff);
-        this.billboardMesh.material.needsUpdate = true;
+        if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+        const m = this.billboardMesh.material;
+        m.map = tex;
+        m.emissiveMap = tex;
+        m.color.setHex(0xffffff);
+        m.emissive.setHex(0xffffff);
+        m.emissiveIntensity = 0.85;
+        m.needsUpdate = true;
       });
     } else if (data.type === 'video') {
       const video = document.createElement('video');
@@ -848,7 +882,7 @@ export class Renderer {
       for (let tx = 0; tx < WORLD.tilesPerSide; tx++) {
         const ox = -half + tx * ts + ts * 0.5;
         const oz = -half + tz * ts + ts * 0.5;
-        const treeCount = 6 + Math.floor(tileSeed(tx, tz, 0) * 5);
+        const treeCount = 2 + Math.floor(tileSeed(tx, tz, 0) * 3);
         for (let i = 0; i < treeCount; i++) {
           const sx = tileSeed(tx, tz, i * 3 + 1);
           const sz = tileSeed(tx, tz, i * 3 + 2);
@@ -914,6 +948,43 @@ export class Renderer {
     this.renderer.setSize(w, h, false);
   }
 
+  _updateRemoteFlash(uid, d) {
+    if (!this.remoteLights) return;
+    let s = this.remoteLights.find((x) => x.uid === uid);
+    if (!s) s = this.remoteLights.find((x) => !x.uid);
+    if (!s) return;
+    s.uid = uid;
+    const on = !!d.fl && d.alive !== false;
+    s.l.intensity = on ? 9 : 0;
+    if (s.beam) s.beam.visible = on;
+    if (!on) return;
+    const yaw = d.yaw || 0;
+    const pitch = d.pitch || 0;
+    const cp = Math.cos(pitch);
+    const head = new THREE.Vector3(d.x, d.y != null ? d.y : 1.7, d.z);
+    s.l.position.copy(head);
+    s.l.target.position.set(
+      head.x - Math.sin(yaw) * cp * 18,
+      head.y + Math.sin(pitch) * 18,
+      head.z - Math.cos(yaw) * cp * 18
+    );
+    s.l.target.updateMatrixWorld();
+    if (s.beam) {
+      s.beam.position.copy(head);
+      s.beam.rotation.set(pitch, yaw, 0, 'YXZ');
+    }
+  }
+
+  _releaseRemoteFlash(uid) {
+    if (!this.remoteLights) return;
+    const s = this.remoteLights.find((x) => x.uid === uid);
+    if (s) {
+      s.uid = null;
+      s.l.intensity = 0;
+      if (s.beam) s.beam.visible = false;
+    }
+  }
+
   /** Update or create remote player mesh + name tag */
   syncRemotePlayer(uid, data, myUid) {
     if (uid === myUid) return;
@@ -942,6 +1013,7 @@ export class Renderer {
     }
     const spr = this.nameSprites.get('p-' + uid);
     if (spr) this._updateNameSprite(spr, data.name || 'Player');
+    this._updateRemoteFlash(uid, data);
   }
 
   pruneRemotePlayers(activeUids) {
@@ -955,6 +1027,7 @@ export class Renderer {
         this.scene.remove(mesh);
         this.nameSprites.delete('p-' + uid);
         delete this.remoteMeshes[uid];
+        this._releaseRemoteFlash(uid);
       }
     }
   }
@@ -1018,6 +1091,10 @@ export class Renderer {
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = yaw;
     this.camera.rotation.x = pitch;
+    if (this.lighterLight) {
+      this.lighterLight.intensity = state.player?.lighter ? 2.4 * (0.85 + Math.random() * 0.3) : 0;
+      this.lighterLight.position.set(eye.x - Math.sin(yaw) * 0.6, eye.y - 0.3, eye.z - Math.cos(yaw) * 0.6);
+    }
 
     // Flashlight follows look direction
     if (this.flashlight) {
