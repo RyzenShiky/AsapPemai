@@ -146,9 +146,14 @@ export class MultiplayerRoom {
   }
 
   async claimHost() {
-    await update(ref(this.db, `rooms/${this.code}/meta`), { hostUid: this.uid });
-    this.isHost = true;
-    this.meta.hostUid = this.uid;
+    try {
+      await update(ref(this.db, `rooms/${this.code}/meta`), { hostUid: this.uid });
+      this.isHost = true;
+      this.meta.hostUid = this.uid;
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   async setStarted(started = true) {
@@ -209,12 +214,16 @@ export class MultiplayerRoom {
       else if (this.meta.hostUid) this.isHost = false;
 
       if (!this.meta.hostUid) {
-        const players = Object.entries(this.remotePlayers).sort(
-          (a, b) => (a[1].joinedAt || 0) - (b[1].joinedAt || 0)
-        );
-        if (players[0] && players[0][0] === this.uid) {
-          this.claimHost().then(() => this._setupDisconnect());
-        }
+        const order = Object.entries(this.remotePlayers)
+          .sort((a, b) => (a[1].joinedAt || 0) - (b[1].joinedAt || 0))
+          .map(([u]) => u);
+        const rank = Math.max(0, order.indexOf(this.uid));
+        clearTimeout(this._claimT);
+        this._claimT = setTimeout(async () => {
+          if (!this.meta.hostUid && (await this.claimHost())) this._setupDisconnect();
+        }, rank * 1500);
+      } else {
+        clearTimeout(this._claimT);
       }
 
       if (typeof this.onUpdate === 'function') this.onUpdate();
@@ -393,6 +402,8 @@ export class MultiplayerRoom {
       deaths: progress.deaths || 0,
     };
     if (weather) payload.weather = weather;
+    const cfg = this.cfg || this.gameStatus;
+    if (cfg && cfg.dayLimit) { payload.mode = cfg.mode; payload.dayLimit = cfg.dayLimit; }
     // Preserve existing t0 across host migration; optional ?t= for night testing
     if (!this.gameStatus.t0 && !this.t0 && typeof location !== 'undefined') {
       const q = parseFloat(new URLSearchParams(location.search).get('t') || '0');
@@ -415,6 +426,7 @@ export class MultiplayerRoom {
   }
 
   async leave() {
+    clearTimeout(this._claimT);
     this.dispose();
     const base = `rooms/${this.code}`;
     try {

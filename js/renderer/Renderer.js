@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
-import { WORLD, tileSeed, ROADS, onRoad } from '../core/WorldConfig.js';
+import { WORLD, tileSeed, ROADS, onRoad, RIVER, LANDMARKS, sample } from '../core/WorldConfig.js';
 import { buildLampSites, lampLevel } from '../core/StreetLamps.js';
 import { MONSTER_TYPES, ROSTER } from '../core/MonsterTypes.js';
 import { VEHICLE_FACE } from '../gameplay/Vehicle.js';
@@ -184,6 +184,8 @@ export class Renderer {
 
     // Roads + street lamps first (light assets)
     this.buildRoads();
+    this.buildRiver();
+    this.buildLandmarks();
     this.buildLamps(buildLampSites(), gfx);
 
     // Heavy monsters load in background; await renderer.monstersReady before start
@@ -348,6 +350,7 @@ export class Renderer {
       this.lampBulbs.setColorAt(i, new THREE.Color(0.05, 0.05, 0.05));
     });
     this.scene.add(poles);
+    this.lampPoles = poles;
     this.scene.add(heads);
     this.scene.add(this.lampBulbs);
 
@@ -942,6 +945,102 @@ export class Renderer {
     this.rockGroup.add(rockIM);
   }
 
+  syncPickups(pickups) {
+    this._pk ??= new Map();
+    const col = { container: 0x5a4630, generator: 0x806020, board: 0x3a5a7a, dropoff: 0x3a7a5a };
+    for (const [id, pk] of Object.entries(pickups || {})) {
+      let m = this._pk.get(id);
+      if (!m) {
+        const big = pk.kind === 'container' || pk.kind === 'generator';
+        m = new THREE.Mesh(
+          new THREE.BoxGeometry(big ? 0.9 : 0.35, big ? 0.6 : 0.35, big ? 0.6 : 0.35),
+          new THREE.MeshStandardMaterial({
+            color: col[pk.kind] ?? 0xd0b060,
+            emissive: pk.kind ? 0x000000 : 0x302008,
+          })
+        );
+        const y = typeof groundHeight === 'function' ? groundHeight(pk.x, pk.z) + 0.3 : 0.3;
+        m.position.set(pk.x, y, pk.z);
+        this.scene.add(m);
+        this._pk.set(id, m);
+      }
+      m.visible = !pk.taken || pk.kind === 'generator';
+    }
+  }
+
+
+  buildRiver() {
+    if (typeof RIVER === 'undefined' || !RIVER?.pts?.length) return;
+    try {
+      const pts = [...sample(RIVER.pts, 4)];
+      const a = RIVER.pts[RIVER.pts.length - 2], b = RIVER.pts[RIVER.pts.length - 1];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      pts.push([b[0], b[1], -(b[1] - a[1]) / L, (b[0] - a[0]) / L]);
+      const half = RIVER.w / 2 + 1.5, Y = -0.55, n = pts.length;
+      const pos = new Float32Array(n * 6);
+      pts.forEach(([x, z, nx, nz], i) => {
+        pos.set([x + nx * half, Y, z + nz * half, x - nx * half, Y, z - nz * half], i * 6);
+      });
+      const idx = [];
+      for (let i = 0; i < n - 1; i++) {
+        const k = i * 2;
+        idx.push(k, k + 2, k + 1, k + 1, k + 2, k + 3);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      this.riverMesh = new THREE.Mesh(
+        geo,
+        new THREE.MeshStandardMaterial({
+          color: 0x9fc4cf, emissive: 0x04121a, roughness: 0.15, metalness: 0.1,
+          transparent: true, opacity: 0.88, side: THREE.DoubleSide,
+        })
+      );
+      this.scene.add(this.riverMesh);
+    } catch (e) {
+      console.warn('buildRiver', e);
+    }
+  }
+
+  buildLandmarks() {
+    if (typeof LANDMARKS === 'undefined' || !LANDMARKS) return;
+    const grp = (this.landmarkGroup = new THREE.Group());
+    try {
+      const { x, z } = LANDMARKS.waterTower;
+      const y0 = groundHeight(x, z), LEG = 9, S = 2;
+      const steel = new THREE.MeshStandardMaterial({ color: 0x4a4f53, roughness: 0.75, metalness: 0.5 });
+      const legGeo = new THREE.CylinderGeometry(0.13, 0.17, LEG, 6);
+      for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const m = new THREE.Mesh(legGeo, steel);
+        m.position.set(x + sx * S, y0 + LEG / 2, z + sz * S);
+        grp.add(m);
+      }
+      const tank = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 3.4, 20), steel);
+      tank.position.set(x, y0 + LEG + 1.7, z);
+      grp.add(tank);
+      const sc = LANDMARKS.summoningCircle;
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(5.2, 5.5, 48).rotateX(-Math.PI / 2),
+        new THREE.MeshBasicMaterial({
+          color: 0x8a1212, transparent: true, opacity: 0.6,
+          side: THREE.DoubleSide, depthWrite: false,
+        })
+      );
+      ring.position.set(sc.x, groundHeight(sc.x, sc.z) + 0.07, sc.z);
+      this._circleMat = ring.material;
+      grp.add(ring);
+      this.scene.add(grp);
+    } catch (e) {
+      console.warn('buildLandmarks', e);
+    }
+  }
+
+  tickWorldFx(dt) {
+    this._fxT = (this._fxT || 0) + dt;
+    if (this._circleMat) this._circleMat.opacity = 0.5 + 0.15 * Math.sin(this._fxT * 1.7);
+  }
+
   resize(w, h) {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -1078,6 +1177,7 @@ export class Renderer {
 
   render(state, eye, yaw, pitch, dt = 0) {
     for (const mixer of this.mixers) mixer.update(dt || 0);
+    this.tickWorldFx(dt || 0);
     // Hide local ridden vehicle (first-person); others still see it
     if (this.vehicleMeshes && state && state.player) {
       const rid = state.player.ridingVehicleId;

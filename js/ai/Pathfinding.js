@@ -28,6 +28,7 @@ function blocked(spatial, wx, wz, radius = 0.55) {
  * @returns {{x,z}[]|null} path from start toward goal (excluding start), or null
  */
 export function findPath(spatial, start, goal, maxNodes = 400) {
+  if (spatial && spatial.levelPath) return spatial.levelPath(start, goal);
   const sx = Math.round(start.x / CELL);
   const sz = Math.round(start.z / CELL);
   const gx = Math.round(goal.x / CELL);

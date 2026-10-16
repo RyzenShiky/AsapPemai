@@ -323,7 +323,8 @@ export class MonsterController {
   moveToward(m, target, dt, speed) {
     // Refresh local A* path every ~0.8 s when chasing/searching
     this._pathAcc = (this._pathAcc || 0) + dt;
-    if (this._pathAcc > 0.8 || !this._path || this._pathIdx >= (this._path?.length || 0)) {
+    const exhausted = !this._path || this._pathIdx >= (this._path?.length || 0);
+    if (this._path === undefined || this._pathAcc > 0.8 || (exhausted && this._pathAcc > 0.25)) {
       this._pathAcc = 0;
       this._path = findPath(this.colliders, m.position, target) || null;
       this._pathIdx = 0;
@@ -331,7 +332,8 @@ export class MonsterController {
     let aim = target;
     if (this._path && this._pathIdx < this._path.length) {
       aim = this._path[this._pathIdx];
-      if (Math.hypot(aim.x - m.position.x, aim.z - m.position.z) < 2.2) {
+      const reach = this.colliders?.levelPath ? 0.9 : 2.2;
+      if (Math.hypot(aim.x - m.position.x, aim.z - m.position.z) < reach) {
         this._pathIdx++;
         if (this._pathIdx < this._path.length) aim = this._path[this._pathIdx];
       }
@@ -364,6 +366,16 @@ export class MonsterController {
   }
 
   widePatrol(m, dt, speed) {
+    const lv = this.state._level;
+    if (lv && lv.patrol) {
+      this._ppT = (this._ppT || 0) + dt;
+      if (!this._pp || this._ppT > 12 || distXZ(m.position, this._pp) < 1.5) {
+        this._pp = lv.patrol(Math.random() < 0.35 ? this.state.data.player.position : m.position);
+        this._ppT = 0;
+      }
+      this.moveToward(m, this._pp, dt, speed);
+      return;
+    }
     const anchor = this.patrolAnchors[this.anchorIdx];
     if (distXZ(m.position, anchor) < 4) {
       this.anchorIdx = (this.anchorIdx + 1) % this.patrolAnchors.length;

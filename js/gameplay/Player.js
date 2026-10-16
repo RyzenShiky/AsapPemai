@@ -5,6 +5,8 @@ import { binds, isBound } from '../input/Bindings.js';
 import { inputMode } from '../core/Device.js';
 import { nearestSpot } from './HideSpots.js';
 import { seatToWorld } from './Vehicle.js';
+import { ITEMS, invWeight, MAX_WEIGHT } from './Items.js';
+const HUNGER_RATE = 0.12, THIRST_RATE = 0.18;
 
 const WALK = 2.8, RUN = 5.5, CROUCH = 1.4;
 const STAMINA_DRAIN = 25, STAMINA_REGEN = 18;
@@ -53,6 +55,9 @@ export class PlayerController {
       }
       if (e.code === binds.hide) this.toggleHide();
       if (e.code === binds.lighter) this.toggleLighter();
+      if (e.code === 'Digit1') this.consume('water');
+      if (e.code === 'Digit2') this.consume('food');
+      if (e.code === 'Digit3') this.consume('fuel');
       if (e.code === binds.throw) this.throwDistraction();
     }, opt);
 
@@ -89,6 +94,27 @@ export class PlayerController {
     return this.keys.has(binds[action]);
   }
 
+  _fitness() {
+    const p = this.state.data.player;
+    return Math.min(1, 0.4 + Math.min(p.hunger ?? 100, p.thirst ?? 100) / 50);
+  }
+  _needs(dt, moving) {
+    const p = this.state.data.player;
+    const k = p.isRunning && moving ? 2 : 1;
+    p.hunger = Math.max(0, (p.hunger ?? 100) - HUNGER_RATE * dt * k);
+    p.thirst = Math.max(0, (p.thirst ?? 100) - THIRST_RATE * dt * k);
+    const h = document.getElementById('hunger-fill'), th = document.getElementById('thirst-fill');
+    if (h) h.style.width = `${p.hunger}%`;
+    if (th) th.style.width = `${p.thirst}%`;
+  }
+  consume(type) {
+    const p = this.state.data.player, inv = this.state.data.inventory;
+    const i = inv ? inv.items.findIndex((it) => it.type === type) : -1;
+    if (i < 0) return false;
+    ITEMS[type]?.use?.(p, this.state);
+    inv.items.splice(i, 1);
+    return true;
+  }
   toggleLighter() {
     const p = this.state.data.player;
     if (!p || (!this.lighterOn && (p.lighterFuel ?? 100) <= 0)) return;
@@ -290,6 +316,11 @@ export class PlayerController {
     if (p.isCrouching) speed = CROUCH;
     else if (p.isRunning) speed = RUN;
     speed *= p._weatherSpeed ?? 1;
+    if ((p.thirst ?? 100) <= 0) speed *= 0.85;
+    try {
+      const load = invWeight(this.state.data.inventory) / MAX_WEIGHT;
+      speed *= 1 - 0.3 * Math.max(0, (load - 0.6) / 0.4);
+    } catch (e) { /* */ }
 
     const { mx: rawMx, mz: rawMz } = this._moveVector(p.rotation.yaw);
     const len = Math.hypot(rawMx, rawMz) || 1;
@@ -306,11 +337,13 @@ export class PlayerController {
     p.position.z = c.z;
     p.position.y = 1.7 + groundHeight(p.position.x, p.position.z);
 
+    const fit = this._fitness();
+    this._needs(dt, moving);
     if (p.isRunning && moving) {
-      p.stamina = Math.max(0, p.stamina - STAMINA_DRAIN * dt);
+      p.stamina = Math.max(0, p.stamina - STAMINA_DRAIN * (2 - fit) * dt);
       this._footAcc += dt * 4;
     } else {
-      p.stamina = Math.min(100, p.stamina + STAMINA_REGEN * dt);
+      p.stamina = Math.min(100, p.stamina + STAMINA_REGEN * fit * dt);
       if (moving) this._footAcc += dt * (p.isCrouching ? 1.2 : 2.2);
     }
 

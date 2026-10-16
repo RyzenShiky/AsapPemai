@@ -1,3 +1,4 @@
+import { BUILDING_DEFS, containersFor } from './Buildings.js';
 export function createInitialState() {
   return {
     player: {
@@ -21,6 +22,11 @@ export function createInitialState() {
       ridingVehicleId: null,
       ridingRole: null,
       battery: 100,
+      hunger: 100,
+      thirst: 100,
+      lighterFuel: 100,
+      money: 0,
+      rep: 0,
       medkits: 0,
     },
     vehicles: [],
@@ -68,10 +74,17 @@ export function createInitialState() {
       bat_a: { type: 'battery', x: 12, z: 20, taken: false },
       bat_b: { type: 'battery', x: -45, z: -30, taken: false },
       bat_c: { type: 'battery', x: 60, z: -55, taken: false },
+      wat_a: { type: 'water', x: 20, z: -10, taken: false },
+      food_a: { type: 'food', x: -30, z: 15, taken: false },
+      fuel_a: { type: 'fuel', x: 45, z: 30, taken: false },
+      board_a: { kind: 'board', x: 21, z: 22, taken: false },
+      gen_a: { kind: 'generator', x: 225, z: -110, taken: false },
+      drop_a: { kind: 'dropoff', x: -24, z: 176, taken: false },
+      ...containersFor(BUILDING_DEFS),
       med_a: { type: 'medkit', x: -10, z: 40, taken: false },
     },
     lore: { found: {}, flags: {}, choices: {} },
-    inventory: { slots: 4, items: [] },
+    inventory: { slots: 8, items: [] },
     progress: {
       playTime: 0,
       deaths: 0,
@@ -92,7 +105,7 @@ const MIGRATIONS = {
   3: (d) => ({
     ...d,
     lore: d.lore || { found: {}, flags: {}, choices: {} },
-    inventory: d.inventory || { slots: 4, items: [] },
+    inventory: d.inventory || { slots: 8, items: [] },
     player: {
       ...d.player,
       battery: d.player?.battery ?? 100,

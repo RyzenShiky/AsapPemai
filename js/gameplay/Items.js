@@ -1,72 +1,85 @@
-/** Item definitions — every item has a function and a cost. */
-export const SOUND = {
-  walk: [0.38, 18],
-  run: [0.9, 38],
-  crouch: [0.12, 9],
-  door: [0.6, 24],
-  drop: [0.7, 28],
-  vehicle: [0.95, 60],
-  radio: [0.45, 20],
-};
-
 export const ITEMS = {
-  battery: {
-    stack: 3,
-    use: (p) => {
-      p.battery = Math.min(100, (p.battery ?? 100) + 40);
-    },
-  },
-  medkit: {
-    stack: 1,
-    useTime: 3.0,
-    use: (p) => {
-      p.health = Math.min(100, (p.health ?? 100) + 40);
-    },
-  },
-  key: { stack: 1, opens: 'gate_a' },
-  crowbar: { stack: 1, opens: 'door_*', noise: SOUND.drop },
-  radio: {
-    stack: 1,
-    use: (p, state) => {
-      state?.emitSound({
-        position: { ...p.position },
-        intensity: SOUND.radio[0],
-        radius: SOUND.radio[1],
-        type: 'radio',
-      });
-    },
-  },
+  battery: { stack: 5, use: (p) => { p.battery = Math.min(100, (p.battery ?? 100) + 40); } },
+  medkit: { stack: 3, use: (p) => { p.health = Math.min(100, (p.health ?? 100) + 40); p.medkits = Math.max(0, (p.medkits || 1) - 1); } },
+  water: { stack: 3, use: (p) => { p.thirst = Math.min(100, (p.thirst ?? 100) + 45); } },
+  food: { stack: 3, use: (p) => { p.hunger = Math.min(100, (p.hunger ?? 100) + 40); } },
+  fuel: { stack: 2, use: (p) => { p.lighterFuel = Math.min(100, (p.lighterFuel ?? 100) + 50); } },
+  key: { stack: 5 },
+  crowbar: { stack: 1 },
+  radio: { stack: 1 },
+  parcel: { stack: 1 },
+  scrap: { stack: 20 },
+  cloth: { stack: 10 },
 };
 
-export const CLUES = [
-  { id: 'note_01', type: 'note', pos: [34, -12], text: 'Jangan ikut suara di hutan…', requires: null },
-  { id: 'tape_02', type: 'tape', pos: [-60, 40], audio: 'tape02', requires: { flag: 'generatorOn' } },
-  { id: 'photo_03', type: 'photo', pos: [10, 88], requires: { clue: 'note_01' } },
-];
+export const MAX_WEIGHT = 12, MAX_SLOTS = 8;
+const WEIGHT = {
+  battery: 0.5, medkit: 1.5, water: 1, food: 0.8, fuel: 2.5, key: 0.1,
+  crowbar: 3, radio: 1.2, parcel: 2, scrap: 0.5, cloth: 0.3,
+};
+export const weightOf = (t) => WEIGHT[t] ?? 1;
+export const invWeight = (inv) => (inv?.items || []).reduce((s, i) => s + weightOf(i.type), 0);
+export const canCarry = (inv, t) =>
+  (inv?.items?.length || 0) < MAX_SLOTS && invWeight(inv) + weightOf(t) <= MAX_WEIGHT;
 
-export function canOpenClue(c, lore) {
-  if (!c.requires) return true;
-  if (c.requires.flag) return !!lore.flags[c.requires.flag];
-  if (c.requires.clue) return !!lore.found[c.requires.clue];
+export const LOOT = {
+  house: [['water', 3], ['food', 3], ['cloth', 2], ['battery', 2], ['scrap', 2], ['fuel', 1]],
+  depot: [['fuel', 3], ['scrap', 3], ['battery', 2], ['medkit', 1], ['crowbar', 1], ['food', 1]],
+};
+
+export function rollLoot(table, seed) {
+  const rows = LOOT[table] || LOOT.house;
+  let s = (seed >>> 0) || 1;
+  const rnd = () => ((s = Math.imul(s ^ (s >>> 15), 2246822519) + 1) >>> 0) / 4294967296;
+  const total = rows.reduce((a, r) => a + r[1], 0);
+  const out = [];
+  for (let i = 0, n = 2 + (rnd() < 0.35 ? 1 : 0); i < n; i++) {
+    let r = rnd() * total;
+    for (const [t, w] of rows) {
+      if ((r -= w) < 0) { out.push(t); break; }
+    }
+  }
+  return out;
+}
+
+export const RECIPES = {
+  medkit: { in: { cloth: 2, water: 1 }, time: 5 },
+  fuel: { in: { scrap: 3 }, time: 4 },
+};
+export function canCraft(inv, r, id) {
+  const cnt = (t) => inv.items.filter((i) => i.type === t).length;
+  const inW = Object.entries(r.in).reduce((s, [t, n]) => s + weightOf(t) * n, 0);
+  return Object.entries(r.in).every(([t, n]) => cnt(t) >= n)
+    && invWeight(inv) - inW + weightOf(id) <= MAX_WEIGHT;
+}
+
+export const SHOP = {
+  pos: { x: -30, z: -12 },
+  stock: { water: [8, 5], food: [10, 5], fuel: [25, 2], cloth: [6, 4] },
+  sell: 0.5,
+};
+export const sellPrice = (t) => Math.floor((SHOP.stock[t]?.[0] ?? 4) * SHOP.sell);
+
+/** Hide-spot quality for inspectSpot. */
+export const SPOTS = { locker: 0.7, bed: 0.5, bush: 0.35, room: 0.4 };
+
+export const NO_SELL = new Set(['key', 'parcel', 'radio']);
+export const countOf = (inv, t) => (inv?.items || []).reduce((n, i) => n + (i.type === t ? 1 : 0), 0);
+
+export function addItem(p, inv, type, force = false) {
+  if (!ITEMS[type] || (!force && !canCarry(inv, type))) return false;
+  inv.items.push({ type });
+  if (type === 'medkit') p.medkits = (p.medkits || 0) + 1;
   return true;
 }
 
-export function resolveEnding(lore) {
-  const k = Object.keys(lore.found || {}).length;
-  if (lore.choices?.freedSurvivor && k >= 6) return 'redemption';
-  if (k >= 6) return 'truth';
-  return lore.choices?.leftSurvivor ? 'abandon' : 'escape';
+export function removeItems(p, inv, type, n = 1) {
+  let left = n;
+  for (let i = inv.items.length - 1; i >= 0 && left > 0; i--) {
+    if (inv.items[i].type !== type) continue;
+    inv.items.splice(i, 1);
+    left--;
+    if (type === 'medkit') p.medkits = Math.max(0, (p.medkits || 0) - 1);
+  }
+  return n - left;
 }
-
-export const OBJECTIVES = [
-  {
-    id: 'restorePower',
-    paths: [
-      { id: 'fuse', needs: ['fuse'] },
-      { id: 'gen', needs: ['fuel', 'battery'], noise: { intensity: 0.8, radius: 45 } },
-    ],
-  },
-];
-
-/** Hide-spot safety base factors. */
-export const SPOTS = { locker: 0.85, bed: 0.65, bush: 0.5, room: 0.4 };

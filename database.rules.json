@@ -18,9 +18,9 @@
           "$uid": {
             ".write": "auth != null && (auth.uid === $uid || (data.exists() && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid))",
             ".validate": "newData.hasChildren(['x','y','z','yaw','alive','health'])",
-            "x": { ".validate": "newData.isNumber() && newData.val() > -300 && newData.val() < 300" },
+            "x": { ".validate": "newData.isNumber() && newData.val() > -650 && newData.val() < 650" },
             "y": { ".validate": "newData.isNumber() && newData.val() > -50 && newData.val() < 200" },
-            "z": { ".validate": "newData.isNumber() && newData.val() > -300 && newData.val() < 300" },
+            "z": { ".validate": "newData.isNumber() && newData.val() > -650 && newData.val() < 650" },
             "yaw": { ".validate": "newData.isNumber()" },
             "alive": { ".validate": "newData.isBoolean()" },
             "isDowned": { ".validate": "newData.isBoolean()" },

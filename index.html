@@ -141,6 +141,10 @@ window.addEventListener('error', function (e) {
           style="position:absolute;top:.5rem;right:.5rem;min-width:0;padding:.4rem .7rem;z-index:30">⚙</button>
         <div id="stamina-bar"><div id="stamina-fill"></div></div>
         <div id="health-bar"><div id="health-fill"></div></div>
+        <div id="hunger-bar" class="need-bar" style="bottom:3.5rem"><div id="hunger-fill"></div></div>
+        <div id="thirst-bar" class="need-bar" style="bottom:4.2rem"><div id="thirst-fill"></div></div>
+        <div id="bag-hud" style="position:absolute;top:2.2rem;right:1rem;text-align:right;white-space:pre;font-size:.8rem;color:#cdb;text-shadow:0 0 4px #000"></div>
+        <div id="bag-panel" class="hidden"></div>
         <div id="battery-bar" title="Battery"><div id="battery-fill"></div></div>
         <p id="battery-warn" class="hidden" style="position:fixed;bottom:18%;left:50%;transform:translateX(-50%);color:#fc6;font-size:.85rem;text-shadow:0 0 6px #000">Baterai habis — cari battery</p>
         <div id="sanity-bar" title="Sanity"><div id="sanity-fill"></div></div>
@@ -217,7 +221,7 @@ window.addEventListener('error', function (e) {
     <button id="bb-close" class="btn" type="button">Close</button>
     <p id="bb-status" class="subtitle"></p>
   </div>
-  <script type="module" src="./js/main.js?v=5.9.1"></script>
+  <script type="module" src="./js/main.js?v=6.1.1"></script>
 <div id="toast" class="hidden" style="position:fixed;bottom:12%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#eee;padding:.6rem 1.2rem;border-radius:6px;z-index:10000;font-size:.9rem;max-width:90%;text-align:center"></div>
 </body>
 </html>

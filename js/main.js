@@ -7,7 +7,9 @@ import { loadProfile, saveProfile, ensureUid } from './core/Profile.js';
 import { PlayerController } from './gameplay/Player.js';
 import { MonsterController } from './gameplay/Monster.js';
 import { nearestMonsterDist, heartFromDistance } from './gameplay/Proximity.js';
+import { LANDMARKS } from './core/WorldConfig.js';
 import { DAY_SECONDS, MATCH_SECONDS, phaseFromProgress, lightingForProgress, randomMonsterSpawn } from './core/DayCycle.js';
+import { ITEMS, RECIPES, SHOP, MAX_SLOTS, MAX_WEIGHT, canCraft, canCarry, invWeight, rollLoot, sellPrice, addItem, removeItems, countOf, NO_SELL } from './gameplay/Items.js';
 import { isInsideBuilding } from './core/Buildings.js';
 import { SanityManager } from './gameplay/Sanity.js';
 import { HallucinationDirector } from './gameplay/HallucinationDirector.js';
@@ -16,7 +18,7 @@ import { PacingDirector } from './core/PacingDirector.js';
 import { WorldDirector } from './core/WorldDirector.js';
 import { WeatherController } from './core/Weather.js';
 import { updateSchedule } from './core/MonsterSchedule.js';
-import { ROSTER, MAX_PLAYERS } from './core/MonsterTypes.js';
+import { ROSTER, MAX_PLAYERS, applyBackroomsMonsters } from './core/MonsterTypes.js';
 import { LevelManager, LEVELS } from './core/Level.js';
 import { weatherMul, weatherSpeed, weatherVis } from './core/Weather.js';
 import { DreadSequencer } from './audio/DreadSequencer.js';
@@ -50,8 +52,11 @@ let hallu = null;
 let weatherCtrl = new WeatherController();
 let hearingMask = 1;
 let level = null;
+let deadShown = false;
 const claimedPickups = new Map();
 const appliedPickups = new Set();
+let bag = null;
+let pkSyncAcc = 1;
 
 function toast(msg, ms = 3500) {
   const el = document.getElementById('toast');
@@ -74,14 +79,40 @@ async function imageToDataUrl(file, max = 768) {
   return url;
 }
 
-function givePickupItem(pk) {
-  const p = state.data.player;
-  const inv = state.data.inventory || { slots: 4, items: [] };
-  if (pk.type === 'battery') p.battery = Math.min(100, (p.battery ?? 100) + 40);
-  else {
-    if (pk.type === 'medkit') p.medkits = (p.medkits || 0) + 1;
-    if (inv.items.length < inv.slots) inv.items.push({ type: pk.type });
+function givePickupItem(pk, id = '') {
+  const p = state.data.player, inv = state.data.inventory;
+  inv ??= { slots: MAX_SLOTS, items: [] };
+  state.data.inventory = inv;
+  if (pk.kind === 'container') {
+    const loot = rollLoot(pk.table || 'house', Math.round((pk.x || 0) * 7 + (pk.z || 0) * 13));
+    let lost = 0;
+    for (const ty of loot) if (!addItem(p, inv, ty)) lost++;
+    if (typeof toast === 'function') toast(`Peti: ${loot.join(', ')}${lost ? ` (${lost} tertinggal)` : ''}`);
+    return;
   }
+  if (pk.kind === 'board') {
+    if (!addItem(p, inv, 'parcel')) { toast?.('Tas penuh'); return; }
+    toast?.('Paket diterima — antar ke dropoff');
+    return;
+  }
+  if (pk.kind === 'dropoff') {
+    if (removeItems(p, inv, 'parcel', 1)) {
+      p.money = (p.money || 0) + 40;
+      p.rep = (p.rep || 0) + 1;
+      toast?.('Paket diterima: +$40');
+    }
+    return;
+  }
+  if (pk.kind === 'generator') {
+    if (removeItems(p, inv, 'fuel', 1)) toast?.('Generator menyala');
+    else toast?.('Butuh fuel');
+    return;
+  }
+  if (pk.type === 'battery') {
+    p.battery = Math.min(100, (p.battery ?? 100) + 40);
+    return;
+  }
+  if (pk.type && !addItem(p, inv, pk.type)) toast?.('Tas penuh — item hilang');
 }
 
 let jumpscareHideTimer = null;
@@ -112,6 +143,7 @@ async function init() {
   const _rawCol = buildColliders();
   colliders = buildSpatialGrid(_rawCol);
   window.__wallsOnly = buildSpatialGrid(_rawCol.filter((c) => c.type === 'wall'));
+  if (LEVELS[new URLSearchParams(location.search).get('level')]) applyBackroomsMonsters();
   renderer = new Renderer();
   await renderer.init(canvas);
   const lv = new URLSearchParams(location.search).get('level');
@@ -187,7 +219,7 @@ async function init() {
   updateRotateHint();
   installLandscapeAutoLock();
   document.getElementById('btn-force-landscape')?.addEventListener('click', async () => {
-    await tryLandscapeLock();
+    tryLandscapeLock({ force: true });
     updateRotateHint();
   });
   const rotHandler = () => {
@@ -243,6 +275,11 @@ async function setupLocalGame(fromSave = false) {
   );
 
   const MONSTER_COUNT = ROSTER.length;
+  state._level = level || null;
+  state._spawnFn = level
+    ? (pl) => level.spawn(pl[(Math.random() * pl.length) | 0], 40, 80)
+    : null;
+  if (level) Object.assign(state.data.player.position, { x: 1.5, y: 1.7, z: 7.5 });
   while (state.data.monsters.length < MONSTER_COUNT) {
     const i = state.data.monsters.length;
     state.data.monsters.push({
@@ -300,6 +337,7 @@ async function setupLocalGame(fromSave = false) {
     const dayEl = document.getElementById('day-limit');
     state.data.world.gameMode = modeEl?.value === 'days' ? 'days' : 'endless';
     state.data.world.dayLimit = Math.max(1, parseInt(dayEl?.value || '3', 10) || 3);
+    if (room?.isHost) room.cfg = { mode: state.data.world.gameMode, dayLimit: state.data.world.dayLimit };
     state.data.world.daysSurvived = 0;
     state.data.world.daySeconds = DAY_LEN;
     state.data.progress.daysReached = 0;
@@ -481,7 +519,7 @@ function wireUI(canvas) {
       }
       const multiBtn = document.getElementById('btn-multi');
       if (multiBtn) multiBtn.disabled = !online;
-      await tryLandscapeLock();
+      tryLandscapeLock({ force: true });
       enterMenu();
     } catch (e) {
       console.error(e);
@@ -510,7 +548,7 @@ function wireUI(canvas) {
       saveProfile(profile);
       const multiBtn = document.getElementById('btn-multi');
       if (multiBtn) multiBtn.disabled = false;
-      await tryLandscapeLock();
+      tryLandscapeLock({ force: true });
       enterMenu();
     } catch (e) {
       console.error(e);
@@ -571,6 +609,46 @@ function wireUI(canvas) {
 
   window.addEventListener('keydown', (e) => {
     const i = document.getElementById('chat-input');
+    if (e.code === 'KeyB' && running && state) {
+      const panel = document.getElementById('bag-panel');
+      if (panel) {
+        panel.classList.toggle('hidden');
+        if (!panel.classList.contains('hidden')) {
+          document.exitPointerLock?.();
+          const inv = state.data.inventory;
+          const p = state.data.player;
+          panel.textContent = '';
+          const w = invWeight(inv).toFixed(1);
+          panel.appendChild(Object.assign(document.createElement('div'), {
+            textContent: `Tas ${inv.items.length}/${MAX_SLOTS} · ${w}/${MAX_WEIGHT} kg · $${p.money || 0}`,
+          }));
+          const counts = {};
+          for (const it of inv.items) counts[it.type] = (counts[it.type] || 0) + 1;
+          for (const [ty, n] of Object.entries(counts)) {
+            const row = document.createElement('div');
+            row.textContent = `${ty} ×${n}`;
+            if (ITEMS[ty]?.use) {
+              const b = document.createElement('button');
+              b.textContent = 'Pakai';
+              b.onclick = () => { player.consume(ty); };
+              row.appendChild(b);
+            }
+            panel.appendChild(row);
+          }
+          for (const [id, r] of Object.entries(RECIPES)) {
+            const b = document.createElement('button');
+            b.textContent = `Craft ${id}`;
+            b.onclick = () => {
+              if (!canCraft(inv, r, id)) return toast?.('Bahan kurang');
+              for (const [ty, n] of Object.entries(r.in)) removeItems(p, inv, ty, n);
+              addItem(p, inv, id, true);
+              toast?.(`Crafted ${id}`);
+            };
+            panel.appendChild(b);
+          }
+        }
+      }
+    }
     if (e.code === 'Enter' && running && i && document.activeElement !== i) {
       e.preventDefault();
       openChat();
@@ -753,6 +831,7 @@ function wireUI(canvas) {
       document.getElementById('hud')?.classList.remove('hidden');
       if (touch && inputMode() === 'touch') touch.show();
       document.getElementById('game-canvas')?.focus();
+      deadShown = false;
       startLoop();
       return;
     }
@@ -787,11 +866,11 @@ function wireUI(canvas) {
   });
 }
 
-function showGameOver(win) {
+function showGameOver(win, keepRunning = false) {
   const rb = document.getElementById('btn-restart');
   if (rb) rb.textContent = (mode === 'multi' && room && !room.gameStatus?.gameOver) ? 'RESPAWN' : 'RESTART';
 
-  running = false;
+  if (!keepRunning) running = false;
   hideTouch();
   document.exitPointerLock?.();
   audio?.setRain?.(false);
@@ -1006,6 +1085,11 @@ function startLoop() {
     player.update(dt);
     tryVehicleInteract();
     level?.update(state.data.player.position, dt, state.data.player, audio);
+    try {
+      const sc = LANDMARKS.summoningCircle, pl = state.data.player;
+      if (sc && Math.hypot(pl.position.x - sc.x, pl.position.z - sc.z) < 7)
+        pl.sanity = Math.max(0, (pl.sanity ?? 100) - 3 * dt);
+    } catch (e) { /* */ }
 
     // Vehicle physics (local driver or host)
     const myUid = room?.uid || deviceUid();
@@ -1110,6 +1194,10 @@ function startLoop() {
       const allDead = others.length === 0 || others.every(([, p]) => p.alive === false);
       if (allDead) { state.data.progress.gameOver = true; state.data.progress.win = false; }
     }
+    if (room?.isHost && !state.data.player.alive && !state.data.progress.gameOver && !deadShown) {
+      deadShown = true;
+      showGameOver(false, true);
+    }
     if (state.data.progress.gameOver) {
       showGameOver(state.data.progress.win);
       if (room && room.isHost) room.writeGame(state.data.progress, state.data.world.weather);
@@ -1208,6 +1296,11 @@ function startLoop() {
     const yaw = state.data.player.rotation.yaw;
     audio.setListenerPosition(eye.x, eye.y, eye.z, -Math.sin(yaw), -Math.cos(yaw));
     // --- Day cycle (loops). Endless or win after N days. ---
+    const gs = room?.gameStatus;
+    if (gs?.dayLimit && room && !room.isHost) {
+      state.data.world.gameMode = gs.mode;
+      state.data.world.dayLimit = gs.dayLimit;
+    }
     const daySec = state.data.world.daySeconds || DAY_LEN;
     const t0 = room?.gameStatus?.t0;
     state.data.world.elapsed = t0
@@ -1225,7 +1318,7 @@ function startLoop() {
           plist.push({ x: rp.x, z: rp.z, yaw: rp.yaw || 0 });
         }
       }
-      updateSchedule(state, plist, dayProgress, dayIndex);
+      updateSchedule(state, plist, level ? 0.6 : dayProgress, dayIndex, !!room || !!level);
     }
     // Street lamps (deterministic, no network)
     if (renderer?.updateLamps) {
@@ -1258,7 +1351,7 @@ function startLoop() {
     }
     // Win only in "days" mode after surviving dayLimit full cycles
     if (
-      (state.data.world.gameMode || 'endless') === 'days' &&
+      !level && (state.data.world.gameMode || 'endless') === 'days' &&
       dayIndex >= (state.data.world.dayLimit || 3) &&
       !state.data.progress.gameOver &&
       state.data.player.alive
@@ -1456,6 +1549,10 @@ function startLoop() {
         loc.textContent = inside.type === 'building' ? 'Gedung' : 'Rumah';
         loc.classList.remove('hidden');
       } else loc.classList.add('hidden');
+    }
+    if ((pkSyncAcc = (pkSyncAcc || 0) + dt) > 0.25) {
+      pkSyncAcc = 0;
+      renderer?.syncPickups?.(state.data.pickups);
     }
     renderer.render(state.data, eye, yaw, state.data.player.rotation.pitch, dt);
   }

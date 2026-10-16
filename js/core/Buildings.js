@@ -2,19 +2,22 @@ const DOOR_W = 1.7;
 const WALL_T = 0.35;
 
 export const BUILDING_DEFS = [
-  { id: 'cabin_n', x: -28, z: -42, w: 8, d: 7, h: 3.2, door: 's', type: 'house', color: 0x3a2a1c },
-  { id: 'cabin_e', x: 48, z: -22, w: 7, d: 6, h: 3.0, door: 'w', type: 'house', color: 0x2e2418 },
-  { id: 'house_w', x: -55, z: 18, w: 11, d: 9, h: 3.8, door: 'e', type: 'house', color: 0x4a3a2e },
-  { id: 'house_s', x: 12, z: 52, w: 10, d: 8, h: 3.6, door: 'n', type: 'house', color: 0x3d3228 },
-  { id: 'warehouse', x: 62, z: 40, w: 16, d: 12, h: 5.5, door: 'w', type: 'building', color: 0x2a2e32 },
-  { id: 'office', x: -40, z: 55, w: 14, d: 10, h: 4.8, door: 's', type: 'building', color: 0x252830 },
-  { id: 'shack', x: 25, z: -55, w: 6, d: 5, h: 2.6, door: 'n', type: 'house', color: 0x2a2018 },
-  { id: 'barn', x: -70, z: -30, w: 12, d: 10, h: 4.2, door: 'e', type: 'building', color: 0x3a2820 },
-  // outer map
-  { id: 'cabin_far1', x: 160, z: -120, w: 8, d: 7, h: 3.2, door: 'w', type: 'house', color: 0x3a2a1c },
-  { id: 'cabin_far2', x: -160, z: 130, w: 9, d: 8, h: 3.4, door: 's', type: 'house', color: 0x2e2418 },
-  { id: 'warehouse_far', x: 140, z: 150, w: 18, d: 14, h: 6, door: 'n', type: 'building', color: 0x22262a },
-  { id: 'house_far', x: -150, z: -140, w: 12, d: 10, h: 4, door: 'e', type: 'house', color: 0x4a3a2e },
+  { id: 'tavern', name: "Joe's Tavern", x: 30, z: -13, w: 14, d: 10, h: 4.2, door: 's', type: 'building', color: 0x4a3322 },
+  { id: 'store', name: 'General Store', x: -30, z: -12, w: 12, d: 9, h: 3.8, door: 's', type: 'building', color: 0x3a3430 },
+  { id: 'info', name: 'Information Center', x: 21, z: 22, w: 13, d: 9, h: 3.8, door: 'w', type: 'building', color: 0x30383a },
+  { id: 'church', name: 'Gereja', x: 8, z: -155, w: 12, d: 20, h: 8, door: 's', type: 'building', color: 0x2a2a30 },
+  { id: 'power', name: 'Power Station', x: 225, z: -110, w: 22, d: 16, h: 7, door: 'w', type: 'building', color: 0x22262a },
+  { id: 'house_1', x: -14, z: 58, w: 10, d: 8, h: 3.6, door: 'e', type: 'house', color: 0x4a3a2e },
+  { id: 'house_2', x: 38, z: 76, w: 9, d: 8, h: 3.4, door: 'w', type: 'house', color: 0x3d3228 },
+  { id: 'house_3', x: -6, z: 118, w: 11, d: 9, h: 3.8, door: 'e', type: 'house', color: 0x3a2a1c },
+  { id: 'house_4', x: 46, z: 140, w: 10, d: 8, h: 3.6, door: 'w', type: 'house', color: 0x2e2418 },
+  { id: 'house_5', x: -24, z: 176, w: 9, d: 8, h: 3.4, door: 'e', type: 'house', color: 0x4a3a2e },
+  { id: 'house_6', x: -170, z: 14, w: 10, d: 8, h: 3.6, door: 'n', type: 'house', color: 0x3d3228 },
+  { id: 'house_7', x: -215, z: -40, w: 9, d: 8, h: 3.4, door: 's', type: 'house', color: 0x2e2418 },
+  { id: 'house_8', x: -248, z: 8, w: 11, d: 9, h: 3.8, door: 'n', type: 'house', color: 0x3a2a1c },
+  { id: 'house_9', x: 150, z: 34, w: 10, d: 8, h: 3.6, door: 'n', type: 'house', color: 0x4a3a2e },
+  { id: 'house_10', x: 175, z: -18, w: 9, d: 8, h: 3.4, door: 's', type: 'house', color: 0x3d3228 },
+  { id: 'house_11', x: 238, z: 34, w: 10, d: 9, h: 3.6, door: 'n', type: 'house', color: 0x2e2418 },
 ];
 
 export function buildingWallColliders(def) {
@@ -80,4 +83,22 @@ export function isInsideBuilding(px, pz) {
     ) return b;
   }
   return null;
+}
+
+export function containersFor(defs) {
+  const out = {};
+  for (const b of defs) {
+    const n = b.type === 'building' ? 3 : 2;
+    for (let i = 0; i < n; i++) {
+      const a = 0.7 + (i / n) * Math.PI * 2;
+      out[`box_${b.id}_${i}`] = {
+        kind: 'container',
+        table: b.type === 'building' ? 'depot' : 'house',
+        taken: false,
+        x: b.x + Math.cos(a) * (b.w / 2 - 1.2),
+        z: b.z + Math.sin(a) * (b.d / 2 - 1.2),
+      };
+    }
+  }
+  return out;
 }

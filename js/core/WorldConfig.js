@@ -1,11 +1,15 @@
-/** 425×425 m forest, center (0,0), tiles 25 m */
+/** ~575×575 m world (2048 studs × 0.28 m) */
+const STUD = 0.28;
+const SIDE_STUDS = 2048;
+const TILES = 23;
 export const WORLD = {
-  size: 425,
-  half: 212.5,
+  size: TILES * 25,
+  half: TILES * 12.5,
   tileSize: 25,
-  tilesPerSide: 17, // 17 * 25 = 425
-  areaM2: 425 * 425,
+  tilesPerSide: TILES,
+  areaM2: (TILES * 25) ** 2,
 };
+export const WORLD_FLAGS = { endless: false };
 
 export function worldToTile(x, z) {
   const tx = Math.floor((x + WORLD.half) / WORLD.tileSize);
@@ -21,6 +25,7 @@ export function tileIndex(tx, tz) {
 }
 
 export function clampToWorld(x, z) {
+  if (WORLD_FLAGS.endless) return { x, z };
   const m = WORLD.half - 1;
   return {
     x: Math.max(-m, Math.min(m, x)),
@@ -36,10 +41,22 @@ export function tileSeed(tx, tz, i) {
 }
 
 /** Main road + branch toward house_s — aligned with BUILDING_DEFS, spawn (0,8) on road. */
+const E = WORLD.half - 12;
 export const ROADS = [
-  { w: 6, pts: [[-195, -12], [-100, -6], [0, 6], [70, 10], [195, 22]] },
-  { w: 4, pts: [[0, 6], [8, 28], [12, 42]] },
+  { w: 6, pts: [[-E, -18], [-150, -10], [-95, -4], [0, 6], [95, 11], [190, 8], [E, 24]] },
+  { w: 4, pts: [[0, 6], [8, 50], [24, 100], [16, 150], [-8, 200]] },
+  { w: 4, pts: [[0, 6], [-3, -50], [2, -100], [8, -140]] },
+  { w: 4, pts: [[95, 11], [130, -30], [185, -90], [205, -110]] },
 ];
+
+export const RIVER = {
+  w: 12,
+  pts: [[-140, -287], [-125, -200], [-100, -100], [-95, -4], [-108, 80], [-90, 170], [-98, 287]],
+};
+export const LANDMARKS = {
+  waterTower: { x: -55, z: -60 },
+  summoningCircle: { x: -215, z: -170 },
+};
 
 /** Yield [x, z, normalX, normalZ] every `step` meters along polyline. */
 export function* sample(pts, step) {
@@ -74,4 +91,10 @@ export function distToRoad(x, z) {
   return d;
 }
 
-export const onRoad = (x, z, m = 0) => distToRoad(x, z) < m;
+export function distToRiver(x, z) {
+  let d = Infinity;
+  for (let i = 0; i < RIVER.pts.length - 1; i++)
+    d = Math.min(d, seg(x, z, ...RIVER.pts[i], ...RIVER.pts[i + 1]));
+  return d - RIVER.w / 2;
+}
+export const onRoad = (x, z, m = 0) => distToRoad(x, z) < m || distToRiver(x, z) < m;

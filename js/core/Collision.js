@@ -1,4 +1,4 @@
-import { WORLD, tileSeed, onRoad, distToRoad } from './WorldConfig.js';
+import { WORLD, tileSeed, onRoad, distToRoad, distToRiver, WORLD_FLAGS, LANDMARKS } from './WorldConfig.js';
 import { allBuildingColliders, nearBuilding } from './Buildings.js';
 
 const CELL = 20;
@@ -41,6 +41,10 @@ export function buildColliders() {
     }
   }
   for (const w of allBuildingColliders()) colliders.push(w);
+  if (LANDMARKS?.waterTower) {
+    const wt = LANDMARKS.waterTower;
+    colliders.push({ x: wt.x, z: wt.z, r: 2.9, type: 'landmark' });
+  }
   return colliders;
 }
 
@@ -140,8 +144,9 @@ export function resolveCollisions(pos, radius, collidersOrSpatial) {
 }
 
 export function groundHeight(x, z) {
+  if (WORLD_FLAGS.endless) return 0;
   const h = Math.sin(x * 0.12) * Math.cos(z * 0.1) * 0.4;
-  // Flatten under roads
+  const carve = 1.4 * Math.min(1, Math.max(0, 1 - distToRiver(x, z) / 8));
   const flat = Math.min(1, Math.max(0, distToRoad(x, z) / 6));
-  return h * flat;
+  return (h - carve) * flat;
 }

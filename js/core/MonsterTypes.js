@@ -60,3 +60,10 @@ export const MONSTER_TYPES = {
 
 export const ROSTER = ['shadow', 'smily', 'boiled', 'siren'];
 export const MAX_PLAYERS = 6;
+
+/** Backrooms: shrink Siren to fit 2.8 m ceiling. Call before renderer.init(). */
+export function applyBackroomsMonsters() {
+  Object.assign(MONSTER_TYPES.siren, {
+    h: 2.7, radius: 0.5, reach: 1.9, speed: 2.3, ignoresTrees: false,
+  });
+}
