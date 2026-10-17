@@ -74,11 +74,22 @@ export function buildSpatialGrid(colliders, cellSize = CELL) {
   return { grid, cellSize };
 }
 
+const NB_CACHE = new WeakMap();   // grid(Map) -> Map(cellKey -> array collider)
+
+/**
+ * Collider di sekitar (x,z). Hasil di-cache per sel (grid statis) -> nol alokasi per panggilan.
+ * PENTING: array yang dikembalikan dipakai bersama, jangan dimodifikasi pemanggil.
+ */
 export function nearbyColliders(spatial, x, z) {
   const { grid, cellSize } = spatial;
   const cx = Math.floor(x / cellSize);
   const cz = Math.floor(z / cellSize);
-  const out = [];
+  let cache = NB_CACHE.get(grid);
+  if (!cache) { cache = new Map(); NB_CACHE.set(grid, cache); }
+  const key = (cx + 4096) * 8192 + (cz + 4096);
+  let out = cache.get(key);
+  if (out) return out;
+  out = [];
   const seen = new Set();
   for (let dx = -1; dx <= 1; dx++) {
     for (let dz = -1; dz <= 1; dz++) {
@@ -91,6 +102,7 @@ export function nearbyColliders(spatial, x, z) {
       }
     }
   }
+  cache.set(key, out);
   return out;
 }
 

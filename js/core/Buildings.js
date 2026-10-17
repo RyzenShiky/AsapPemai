@@ -96,7 +96,7 @@ export function allBuildingColliders() {
       type: 'wall',
     };
     out.push(col);
-    DOORS.push({ id: def.id, x: x + dx, z: z + dz, open: false, col });
+    DOORS.push({ id: def.id || (`b_${def.x}_${def.z}`), x: x + dx, z: z + dz, open: false, col });
   }
   try {
     for (const sx of [-0.3, 0.3]) {

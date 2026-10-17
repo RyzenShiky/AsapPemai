@@ -62,12 +62,12 @@ export class MonsterController {
         list.push({
           uid,
           pos: { x: rp.x, y: rp.y ?? 1.7, z: rp.z },
-          hiding: false,
+          hiding: !!rp.hiding,
           flash: !!rp.fl,
         });
       }
     }
-    if (!list.length) return { uid: 'me', pos: me.position, hiding: false, flash: false };
+    if (!list.length) return { uid: 'me', pos: me.position, hiding: !!rp.hiding, flash: false };
     let best = null, bd = Infinity;
     for (const tg of list) {
       let d = Math.hypot(m.position.x - tg.pos.x, m.position.z - tg.pos.z);

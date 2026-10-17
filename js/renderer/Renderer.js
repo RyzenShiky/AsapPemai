@@ -49,7 +49,13 @@ export class Renderer {
       stencil: false,
       depth: true,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, gfx.pixelRatioCap));
+    this._prCap = Math.min(window.devicePixelRatio || 1, gfx.pixelRatioCap);
+    this._pr = this._prCap;
+    this._prMin = Math.max(0.5, this._prCap * 0.6);
+    this._perf = { t0: performance.now(), frames: 0, good: 0, warm: 4 };
+    this.renderer.setPixelRatio(this._pr);
+    canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this._ctxLost = true; }, false);
+    canvas.addEventListener('webglcontextrestored', () => { this._ctxLost = false; }, false);
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     this.renderer.setClearColor(0x07080a);
     // ACES is expensive on mobile GPUs
@@ -653,10 +659,31 @@ export class Renderer {
           if (c.isMesh && c.material) c.material = c.material.clone();
         });
         this.scene.add(mesh);
-        this.vehicleMeshes[v.id] = mesh;
+        mesh.rotation.order = 'YXZ';
+      this.vehicleMeshes[v.id] = mesh;
       }
-      mesh.position.set(v.position.x, v.position.y || 0, v.position.z);
-      mesh.rotation.y = v.rotation.yaw + VEHICLE_FACE;
+      const m = mesh, kk = 1 - Math.exp(-12 * (this._dt || 0.016));
+      if (m.rotation.order !== 'YXZ') m.rotation.order = 'YXZ';
+      const _tmp = (this._vTmp ||= new THREE.Vector3());
+      if (!m.userData.init || !v.remote) {
+        m.position.set(v.position.x, v.position.y || 0, v.position.z);
+      } else {
+        m.position.lerp(_tmp.set(v.position.x, v.position.y || 0, v.position.z), kk);
+      }
+      m.userData.init = 1;
+      {
+        const face = (typeof VEHICLE_FACE !== 'undefined' ? VEHICLE_FACE : Math.PI);
+        const ty = (v.rotation.yaw || 0) + face;
+        if (v.remote) {
+          let dy = ((ty - m.rotation.y + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+          m.rotation.y += dy * kk;
+        } else {
+          m.rotation.y = ty;
+        }
+      }
+      m.rotation.z += (-(v._steer || 0) * Math.min(1, Math.abs(v.speed || 0) / 9) * 0.25 - m.rotation.z) * kk;
+      m.rotation.x += (((v.speed || 0) - (v._lastSpd || 0)) * -0.004 - m.rotation.x) * kk;
+      v._lastSpd = v.speed || 0;
     }
     for (const id of Object.keys(this.vehicleMeshes)) {
       if (!seen.has(id)) {
@@ -672,6 +699,7 @@ export class Renderer {
     this._lastBillboardUrl = data.url;
     this._screenVideo?.pause();
     this._screenVideo = null;
+    this._vidCopy = null;
     try { this._screenTex?.dispose?.(); } catch (e) { /* */ }
     if (data.type === 'image' || !data.type) {
       new THREE.TextureLoader().load(data.url, (tex) => {
@@ -688,13 +716,32 @@ export class Renderer {
       video.playsInline = true;
       video.play().catch(() => {});
       this._screenVideo = video;
-      const tex = new THREE.VideoTexture(video);
+      let tex;
+      if (this.gfx?.touch) {
+        const cv = document.createElement('canvas');
+        cv.width = 384; cv.height = 216;
+        this._vidCopy = { video, cv, g: cv.getContext('2d'), acc: 0 };
+        tex = new THREE.CanvasTexture(cv);
+      } else {
+        this._vidCopy = null;
+        tex = new THREE.VideoTexture(video);
+      }
       if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
       this._setScreens(tex);
     } else if (data.type === 'audio' && audio && this.billboardMesh) {
       const p = this.billboardMesh.getWorldPosition(new THREE.Vector3());
       audio.playPositionalFile?.(data.url, { x: p.x, y: p.y, z: p.z });
     }
+  }
+
+  _tickVideo(dt) {
+    const v = this._vidCopy;
+    if (!v || v.video.readyState < 2) return;
+    v.acc += dt;
+    if (v.acc < 1 / 12) return;
+    v.acc = 0;
+    v.g.drawImage(v.video, 0, 0, v.cv.width, v.cv.height);
+    if (this._screenTex) this._screenTex.needsUpdate = true;
   }
 
   _setupAnimated(mesh, clips, defaultClip) {
@@ -864,7 +911,7 @@ export class Renderer {
       );
       pivot.add(leaf);
       this.buildingGroup.add(pivot);
-      this.doors[def.id] = { pivot, closed: H[2], open: false };
+      this.doors[def.id || (`b_${def.x}_${def.z}`)] = { pivot, closed: H[2], open: false };
     }
     for (const { mat, geos } of buckets.values()) {
       if (!geos.length) continue;
@@ -1195,7 +1242,7 @@ export class Renderer {
   }
 
   _initTVLights(gfx) {
-    const n = gfx?.touch ? 1 : 2;
+    const n = gfx?.touch ? 0 : 2;   // HP/tablet: no TV PointLights
     this.tvLights = Array.from({ length: n }, () => {
       const l = new THREE.PointLight(0x8fb4ff, 0, 7, 2);
       this.scene.add(l);
@@ -1242,6 +1289,31 @@ export class Renderer {
   cycleCCTV(d) {
     if (!this.cctv) return;
     this.cctv.i = (this.cctv.i + d + this.cctv.cams.length) % this.cctv.cams.length;
+  }
+
+  /** Resolusi dinamis: turun jika FPS < 40, naik pelan jika stabil > 57. */
+  _adaptRes() {
+    const p = this._perf, now = performance.now();
+    if (!p) return;
+    p.frames++;
+    const span = now - p.t0;
+    if (span < 1000) return;
+    const fps = (p.frames * 1000) / span;
+    p.frames = 0; p.t0 = now;
+    if (document.hidden) return;
+    if (p.warm > 0) { p.warm--; return; }
+    let pr = this._pr;
+    if (fps < 40) {
+      p.good = 0;
+      pr = Math.max(this._prMin, pr - 0.1);
+    } else if (fps > 57) {
+      if (++p.good >= 5) { p.good = 0; pr = Math.min(this._prCap, pr + 0.1); }
+    } else p.good = 0;
+    if (Math.abs(pr - this._pr) < 1e-3) return;
+    this._pr = pr;
+    this.renderer.setPixelRatio(pr);
+    const c = this.renderer.domElement;
+    this.renderer.setSize(c.clientWidth, c.clientHeight, false);
   }
 
   resize(w, h) {
@@ -1312,6 +1384,7 @@ export class Renderer {
         if (c.isMesh && c.material) c.material = c.material.clone();
       });
       this.scene.add(mesh);
+      mesh.rotation.order = 'YXZ';
       mesh.userData.anim = this._setupAnimated(mesh, this.playerAnimations, 'Idle');
       this.remoteMeshes[uid] = mesh;
       this._attachNameTag(mesh, data.name || 'Player', 'p-' + uid);
@@ -1320,13 +1393,31 @@ export class Renderer {
     const footY = (data.footY != null)
       ? data.footY
       : ((data.y || 1.7) - 1.7);
-    mesh.position.set(data.x, footY, data.z);
-    mesh.rotation.y = (data.yaw || 0) + Math.PI; // FACE_OFFSET: GLB faces +Z
+    const u = mesh.userData;
+    const k = 1 - Math.exp(-14 * (this._dt || 0.016));
+    const tgt = (u.tgt ||= new THREE.Vector3()).set(data.x, footY, data.z);
+    if (!u.init || mesh.position.distanceTo(tgt) > 8) { mesh.position.copy(tgt); u.init = 1; }
+    else mesh.position.lerp(tgt, k);
+    const ty = (data.yaw || 0) + Math.PI;
+    let dy = ((ty - mesh.rotation.y + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+    mesh.rotation.y += dy * k;
     mesh.visible = data.alive !== false;
+    // crawl: flatten
+    if (data.moveState === 'crawl' || data.isDowned) mesh.rotation.x += (Math.PI / 2.2 - mesh.rotation.x) * k;
+    else mesh.rotation.x += (0 - mesh.rotation.x) * k;
     if (mesh.userData.anim) {
-      const clip =
-        data.moveState === 'run' ? 'Run' : data.moveState === 'walk' ? 'Walk' : 'Idle';
-      this._playAction(mesh.userData.anim, clip);
+      if (data.moveState === 'riding' || data.ridingVehicleId) {
+        this._playAction(mesh.userData.anim, 'Idle');
+      } else {
+        const clip =
+          data.moveState === 'run' ? 'Run' : data.moveState === 'walk' ? 'Walk' : 'Idle';
+        this._playAction(mesh.userData.anim, clip);
+      }
+      const sp = u.lastPos ? u.lastPos.distanceTo(mesh.position) / Math.max(this._dt || 0.016, 0.001) : 0;
+      (u.lastPos ||= new THREE.Vector3()).copy(mesh.position);
+      const a = u.anim?.actions?.[u.anim.current];
+      if (a) a.timeScale = u.anim.current === 'Run' ? sp / 5.5 : u.anim.current === 'Walk' ? sp / 2.8 : 1;
+      u.sit = !!(data.moveState === 'riding' || data.ridingVehicleId);
     }
     const spr = this.nameSprites.get('p-' + uid);
     if (spr) this._updateNameSprite(spr, data.name || 'Player');
@@ -1394,14 +1485,27 @@ export class Renderer {
   }
 
   render(state, eye, yaw, pitch, dt = 0) {
+    if (this._ctxLost) return;
+    this._dt = dt || 0.016;
     for (const mixer of this.mixers) mixer.update(dt || 0);
+    for (const m of Object.values(this.remoteMeshes || {})) {
+      if (!m.userData.sit) continue;
+      const b = (n) => m.getObjectByName(n);
+      try {
+        if (b('thigh.L')) b('thigh.L').rotation.x = -1.35;
+        if (b('thigh.R')) b('thigh.R').rotation.x = -1.35;
+        if (b('shin.L')) b('shin.L').rotation.x = 1.3;
+        if (b('shin.R')) b('shin.R').rotation.x = 1.3;
+        if (b('spine')) b('spine').rotation.x = 0.2;
+      } catch (e) { /* */ }
+    }
     this.tickWorldFx(dt || 0);
     this.updateDoors(dt || 0);
     // Hide local ridden vehicle (first-person); others still see it
     if (this.vehicleMeshes && state && state.player) {
       const rid = state.player.ridingVehicleId;
       for (const id in this.vehicleMeshes) {
-        this.vehicleMeshes[id].visible = id !== rid;
+        this.vehicleMeshes[id].visible = true;
       }
     }
     this._updateThrowables(dt || 0);
@@ -1428,7 +1532,7 @@ export class Renderer {
       this.flashlight.intensity = on ? base * flick : 0;
       this.flashlight.distance = on ? 50 : 0;
       this.flashlight.position.copy(this.camera.position);
-      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      const dir = (this._fwd ??= new THREE.Vector3()).set(0, 0, -1).applyQuaternion(this.camera.quaternion);
       this.flashlightTarget.position.copy(this.camera.position).addScaledVector(dir, 18);
       this.flashlight.target.updateMatrixWorld();
       if (this.flashlightFill) {
@@ -1461,6 +1565,8 @@ export class Renderer {
     });
 
     this._updateRain(dt || 0, this.camera.position);
+    this._tickVideo(dt || 0);
     this.renderer.render(this.scene, this.camera);
+    this._adaptRes();
   }
 }

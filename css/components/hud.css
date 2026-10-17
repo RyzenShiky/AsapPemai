@@ -228,7 +228,7 @@
 #battery-bar.low #battery-fill { background: #c44; }
 
 #chat-log { position: absolute; left: 12px; bottom: 150px; width: min(360px, 60vw); font-size: .8rem; color: #ddd; text-shadow: 0 0 4px #000; pointer-events: none; z-index: 25; }
-#chat-input { position: absolute; left: 12px; bottom: 118px; width: min(360px, 60vw); pointer-events: auto; background: rgba(0,0,0,.65); color: #fff; border: 1px solid #555; padding: .3rem .5rem; z-index: 25; }
+/* #chat-input positioned by #chat-form */
 
 .need-bar { position: absolute; left: 50%; transform: translateX(-50%); width: min(200px, 38vw); height: 4px; background: rgba(0,0,0,.6); border: 1px solid #444; }
 #hunger-fill { height: 100%; width: 100%; background: #b8862b; }
@@ -305,3 +305,10 @@
 .cctv{position:fixed;inset:0;pointer-events:none;z-index:50;padding:16px;color:#9f9;font:14px monospace;
  background:repeating-linear-gradient(0deg,rgba(0,30,0,.22) 0 1px,transparent 1px 3px),radial-gradient(transparent 55%,rgba(0,0,0,.7))}
 .cctv small{position:absolute;bottom:16px;left:16px;opacity:.7}
+
+/* CCTV: tombol layar sentuh */
+.cctv .cctv-ui { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+  display: flex; gap: 10px; pointer-events: auto; }
+.cctv .cctv-ui button { min-width: 64px; padding: 12px 16px; font-size: 16px; color: #cfc;
+  background: rgba(0,30,0,.55); border: 1px solid #4a4; border-radius: 8px; touch-action: manipulation; }
+.cctv .cctv-ui button:active { background: rgba(40,120,40,.7); }

@@ -29,6 +29,7 @@ import { MultiplayerRoom, roomCode as genRoomCode, initFirebase, deviceUid, uplo
 import { AudioManager } from './audio/AudioManager.js';
 import { Renderer } from './renderer/Renderer.js';
 import { TouchControls } from './input/TouchControls.js';
+import { openLayoutEditor } from './input/UILayout.js';
 import { binds, rebind, resetBinds, keyLabel } from './input/Bindings.js';
 import {
   getAuth, GoogleAuthProvider, signInWithPopup,
@@ -450,29 +451,55 @@ function addChat(m) {
   const log = document.getElementById('chat-log');
   if (!log) return;
   const d = document.createElement('div');
-  d.textContent = (m.name || '?') + ': ' + (m.text || '');
+  d.className = 'chat-line';
+  const b = document.createElement('b');
+  b.textContent = (m.name || '?') + ': ';
+  d.append(b, document.createTextNode(m.text || ''));
   log.appendChild(d);
   while (log.children.length > 6) log.firstChild.remove();
   setTimeout(() => d.remove(), 12000);
 }
 function openChat() {
+  if (!room) {
+    if (typeof toast === 'function') toast('Chat hanya tersedia di mode Multiplayer');
+    // still allow solo local log
+  }
+  const f = document.getElementById('chat-form');
   const i = document.getElementById('chat-input');
-  if (!room || !i) return;
+  if (!f || !i) return;
   document.exitPointerLock?.();
-  i.classList.remove('hidden');
+  f.classList.remove('hidden');
   i.focus();
 }
 function closeChat() {
+  const f = document.getElementById('chat-form');
   const i = document.getElementById('chat-input');
-  if (!i) return;
+  if (!f || !i) return;
   i.value = '';
-  i.classList.add('hidden');
   i.blur();
+  f.classList.add('hidden');
   document.getElementById('game-canvas')?.focus();
+}
+function submitChat() {
+  const i = document.getElementById('chat-input');
+  const text = (i?.value || '').trim();
+  if (text) {
+    const name = profile.displayName || 'Player';
+    if (room) room.sendChat(text, name).catch((e) => console.warn('chat', e));
+    else addChat({ name, text });
+  }
+  closeChat();
 }
 
 function enterLobby() {
-  if (room) room.onChat = addChat;
+  if (room) {
+    room.onChat = addChat;
+    room.listenDoors?.((id, open) => {
+      const d = DOORS.find((x) => x.id === id);
+      if (d) setDoor(d, open);
+      renderer?.setDoorOpen(id, open);
+    });
+  }
   document.getElementById('lobby-code').textContent = room.code;
   document.getElementById('multi-screen').classList.add('hidden');
   document.getElementById('lobby-screen').classList.remove('hidden');
@@ -524,7 +551,16 @@ const cctv = {
     state.data.player.cctv = true;
     this.on = true;
     this.hp = state.data.player.health;
-    this.el ??= Object.assign(document.createElement('div'), { className: 'cctv' });
+    if (!this.el) {
+      this.el = Object.assign(document.createElement('div'), { className: 'cctv' });
+      this.el.addEventListener('click', (e) => {
+        const a = e.target.closest('button')?.dataset.a;
+        if (!a) return;
+        if (a === 'prev') { renderer.cycleCCTV(-1); this.draw(); }
+        else if (a === 'next') { renderer.cycleCCTV(1); this.draw(); }
+        else if (a === 'exit') this.exit();
+      });
+    }
     document.body.appendChild(this.el);
     this.draw();
   },
@@ -537,7 +573,15 @@ const cctv = {
   draw() {
     const c = renderer?.cctv;
     if (!c || !this.el) return;
-    this.el.innerHTML = `<b>● REC</b> CAM ${c.i + 1}/${c.cams.length} — ${c.cams[c.i].name}<small>A/D ganti kamera · E atau Esc keluar</small>`;
+    const hint = (typeof inputMode === 'function' && inputMode() === 'touch')
+      ? '' : '<small>A/D ganti kamera · E atau Esc keluar</small>';
+    this.el.innerHTML =
+      `<b>● REC</b> CAM ${c.i + 1}/${c.cams.length} — ${c.cams[c.i].name}${hint}` +
+      `<div class="cctv-ui">` +
+      `<button type="button" data-a="prev" aria-label="Kamera sebelumnya">◀</button>` +
+      `<button type="button" data-a="exit">✕ KELUAR</button>` +
+      `<button type="button" data-a="next" aria-label="Kamera berikutnya">▶</button>` +
+      `</div>`;
   },
 };
 let typedSecret = '';
@@ -551,20 +595,30 @@ window.addEventListener('keydown', (e) => {
 
 function tryUse() {
   const p = state?.data?.player;
-  if (!p || !player) return;
-  if (!player.keys.has(binds.interact)) { player._useLatch = false; return; }
-  if (player._useLatch || p.ridingVehicleId || p.isDowned) return;
-  if (/(tru|monst)e$/.test(typedSecret) || document.getElementById('billboard-panel')?.classList.contains('open')) return;
+  if (!p || !player) return false;
+  if (!player.keys.has(binds.interact)) { player._useLatch = false; return false; }
+  if (player._useLatch || p.ridingVehicleId || p.isDowned) return false;
+  if (document.getElementById('billboard-panel')?.classList.contains('open')) return false;
+  if (/(tru|monst)e$/.test(typedSecret)) return false;
   player._useLatch = true;
-  if (cctv.on) return cctv.exit();
+  if (cctv.on) { cctv.exit(); return true; }
   const { x, z } = p.position;
-  const tv = renderer?.tvSpots?.find((s) => Math.hypot(s.x - x, s.z - z) < 1.8);
-  if (tv) return cctv.enter(tv);
-  const d = DOORS.find((dd) => Math.hypot(dd.x - x, dd.z - z) < 2.2);
-  if (d) {
-    setDoor(d, !d.open);
-    renderer?.setDoorOpen(d.id, d.open);
+  // Door first (before TV / vehicle) — range 3.5 m
+  let best = null, bd = 3.5;
+  for (const dd of DOORS) {
+    const dist = Math.hypot(dd.x - x, dd.z - z);
+    if (dist < bd) { bd = dist; best = dd; }
   }
+  if (best) {
+    setDoor(best, !best.open);
+    renderer?.setDoorOpen(best.id, best.open);
+    room?.writeDoor?.(best.id, best.open);
+    if (typeof toast === 'function') toast(best.open ? 'Pintu terbuka' : 'Pintu tertutup', 1200);
+    return true;
+  }
+  const tv = renderer?.tvSpots?.find((s) => Math.hypot(s.x - x, s.z - z) < 1.8);
+  if (tv) { cctv.enter(tv); return true; }
+  return false;
 }
 
 function tickDoorBash(dt) {
@@ -578,6 +632,7 @@ function tickDoorBash(dt) {
     if (d.hp <= 0) {
       setDoor(d, true);
       renderer?.setDoorOpen(d.id, true);
+      room?.writeDoor?.(d.id, true);
     }
   }
 }
@@ -745,6 +800,13 @@ function wireUI(canvas) {
     }
   });
   document.getElementById('btn-chat')?.addEventListener('click', openChat);
+  document.getElementById('btn-ui-layout')?.addEventListener('click', () => {
+    openLayoutEditor({
+      touch,
+      TouchControls,
+      root: document.getElementById('ui-root') || document.body,
+    });
+  });
   document.getElementById('chat-cancel')?.addEventListener('click', closeChat);
   document.getElementById('chat-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -1164,6 +1226,7 @@ function startLoop() {
   running = true;
   tryLandscapeLock();
   try { audio.resume?.(); audio.playMusic?.(3); } catch (e) { /* */ }
+  let locKey = '', locEl = null;
   function step() {
     if (!running) return;
     const dt = Math.min(0.05, clock.tick()); // clamp: avoid spiral on lag spikes
@@ -1171,8 +1234,8 @@ function startLoop() {
     const isAuthority = mode === 'solo' || (room && room.isHost);
 
     player.update(dt);
-    tryVehicleInteract();
-    tryUse();
+    const used = tryUse();
+    if (!used) tryVehicleInteract();
     tickDoorBash(dt);
     if (cctv.on) {
       const pl = state.data.player;
@@ -1193,6 +1256,12 @@ function startLoop() {
         || (state.data.player.ridingVehicleId === v.id && state.data.player.ridingRole === 'driver');
       if (isDriver) {
         if (!v.driverUid) v.driverUid = myUid;
+        if (room?.remotePlayers) {
+          v.passengerUids = Object.entries(room.remotePlayers)
+            .filter(([u, rp]) => rp.ridingVehicleId === v.id && rp.ridingRole !== 'driver' && u !== myUid)
+            .map(([u]) => u);
+          // include local self if passenger somehow - skip
+        }
         v.driveUpdate(dt, player.keys, colliders, state, audio, v.driverUid || myUid);
         v.checkMonsterHits(state.data.monsters, now, (dmg) => {
           const pl = state.data.player;
@@ -1217,14 +1286,23 @@ function startLoop() {
     if (room && room.remoteVehicles) {
       const list = [];
       for (const [id, rv] of Object.entries(room.remoteVehicles)) {
-        if (rv.driver === myUid || state.data.player.ridingVehicleId === id) continue;
+        if (rv.driver === myUid) continue; // penumpang tetap terima update posisi
         let v = vehicleControllers.find((x) => x.id === id);
         if (!v) {
           v = new VehicleController(rv.type || 'motor', { x: rv.x, y: rv.y, z: rv.z }, id);
           v.remote = true;
           vehicleControllers.push(v);
         }
-        v.position.x = rv.x; v.position.y = rv.y || 0; v.position.z = rv.z;
+        {
+          const kv = 1 - Math.exp(-14 * dt);
+          if (Math.hypot(rv.x - v.position.x, rv.z - v.position.z) > 8) {
+            v.position.x = rv.x; v.position.z = rv.z;
+          } else {
+            v.position.x += (rv.x - v.position.x) * kv;
+            v.position.z += (rv.z - v.position.z) * kv;
+          }
+          v.position.y = rv.y || 0;
+        }
         v.rotation.yaw = rv.yaw || 0;
         v.driverUid = rv.driver;
         v.passengerUids = rv.passengers || [];
@@ -1324,21 +1402,24 @@ function startLoop() {
             v.driverUid === room.uid ||
             (!v.driverUid && (v.ownerUid === room.uid || (room.isHost && !v.ownerUid)))
           ) {
-            room.writeVehicle(v);
+            if (room?.remotePlayers) {
+          v.passengerUids = Object.entries(room.remotePlayers)
+            .filter(([u, rp]) => rp.ridingVehicleId === v.id && rp.ridingRole !== 'driver')
+            .map(([u]) => u);
+        }
+        room.writeVehicle(v);
           }
         }
         if (room.isHost) {
           room.writeMonsters(state.data.monsters);
           room.writeGame(state.data.progress, state.data.world.weather);
         }
-        let last = null;
-        const evs = state.data.world.activeSoundEvents;
-        for (let i = evs.length - 1; i >= 0; i--) {
-          if (!evs[i].net) { last = evs[i]; break; }
-        }
-        if (last && last.id !== lastSentSoundId) {
-          lastSentSoundId = last.id;
-          room.writeSound(last);
+        const evs = state.data.world.activeSoundEvents || [];
+        const mine = evs.filter((e) => !e.net);
+        const newest = mine[mine.length - 1];
+        if (newest && newest.id !== lastSentSoundId) {
+          lastSentSoundId = newest.id;
+          room.writeSounds?.(mine.slice(-6));
         }
       }
       if (room.isHost) {
@@ -1643,12 +1724,14 @@ function startLoop() {
     if (room?.remoteBillboard && renderer) {
       renderer.applyBillboardMedia(room.remoteBillboard, audio);
     }
-    const loc = document.getElementById('location-hint');
-    if (loc) {
-      if (inside) {
-        loc.textContent = inside.type === 'building' ? 'Gedung' : 'Rumah';
-        loc.classList.remove('hidden');
-      } else loc.classList.add('hidden');
+    const lk = inside ? inside.type : '';
+    if (lk !== locKey) {
+      locKey = lk;
+      locEl ??= document.getElementById('location-hint');
+      if (locEl) {
+        if (lk) { locEl.textContent = lk === 'building' ? 'Gedung' : 'Rumah'; locEl.classList.remove('hidden'); }
+        else locEl.classList.add('hidden');
+      }
     }
     if ((pkSyncAcc = (pkSyncAcc || 0) + dt) > 0.25) {
       pkSyncAcc = 0;
@@ -1657,12 +1740,19 @@ function startLoop() {
     renderer.render(state.data, eye, yaw, state.data.player.rotation.pitch, dt);
   }
 
+  let errStreak = 0;
   function frame() {
     if (!running) return;
     try {
       step();
+      errStreak = 0;
     } catch (e) {
-      console.error('frame error', e);
+      if (errStreak++ < 3) console.error('frame error', e);
+      if (errStreak > 180) {
+        running = false;
+        try { toast('Terjadi error. Muat ulang halaman.'); } catch (_) { /* */ }
+        return;
+      }
     }
     if (running) requestAnimationFrame(frame);
   }

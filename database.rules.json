@@ -27,7 +27,7 @@
             "health": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
             "name": { ".validate": "newData.isString() && newData.val().length <= 16" },
             "color": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9a-fA-F]{6}$/)" },
-            "$other": { ".validate": "$other.matches(/^(footY|moveState|downedTimer|ridingVehicleId|ridingRole|joinedAt|fl|pitch)$/) && (newData.isNumber() || (newData.isString() && newData.val().length < 40) || newData.isBoolean())" }
+            "$other": { ".validate": "$other.matches(/^(footY|moveState|downedTimer|ridingVehicleId|ridingRole|joinedAt|fl|pitch|hiding)$/) && (newData.isNumber() || (newData.isString() && newData.val().length < 40) || newData.isBoolean())" }
           }
         },
         "soundEvents": {

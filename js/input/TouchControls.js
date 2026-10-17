@@ -1,3 +1,4 @@
+import { applyLayout } from './UILayout.js';
 /**
  * Multi-touch: joystick (left) + look (right) + action buttons.
  * Look applies immediately with higher sensitivity for responsive camera.
@@ -60,12 +61,20 @@ export class TouchControls {
     this.el.addEventListener('touchcancel', this._onEnd, { passive: false });
 
     this._bindButtons();
+    this._relayout = () => { applyLayout(this); this._syncLayout(); };
+    applyLayout(this);
+    window.addEventListener('resize', this._relayout);
+  }
+
+  destroy() {
+    window.removeEventListener('resize', this._relayout);
+    this.el?.remove();
   }
 
   show() {
     this.el.classList.add('visible');
     this.active = true;
-    this._syncLayout();
+    this._relayout?.() || this._syncLayout();
   }
 
   hide() {
@@ -177,7 +186,7 @@ export class TouchControls {
     for (const t of e.changedTouches) {
       if (this._touchIn(this.btnRun, t) || this._touchIn(this.btnCrouch, t) ||
           this._touchIn(this.btnFlash, t) || this._touchIn(this.btnHide, t) ||
-          this._touchIn(this.btnThrow, t) || this._touchIn(this.btnRevive, t)) {
+          this._touchIn(this.btnThrow, t) || this._touchIn(this.btnRevive, t) || this._touchIn(this.btnLighter, t)) {
         continue;
       }
       if (this._joyId == null && this._touchIn(this.joyZone, t)) {

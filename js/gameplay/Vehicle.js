@@ -69,7 +69,8 @@ export class VehicleController {
   dismount(uid) {
     if (this.driverUid === uid) {
       this.driverUid = null;
-      // leave vehicle stopped; passenger must remount as driver
+      this.speed = 0;
+      this._steer = 0;
     } else {
       this.passengerUids = this.passengerUids.filter((u) => u !== uid);
     }
@@ -111,7 +112,9 @@ export class VehicleController {
     this.targetSpeed = throttle * maxSpd;
     this.speed += (this.targetSpeed - this.speed) * Math.min(1, 3 * dt);
     if (Math.abs(this.speed) > 0.3) {
-      this.rotation.yaw += turn * turnRate * dt * Math.sign(this.speed || 1);
+      this._steer = (this._steer || 0) + (turn - (this._steer || 0)) * Math.min(1, 8 * dt);
+      const rate = turnRate * (1 - 0.45 * Math.min(1, Math.abs(this.speed) / maxSpd));
+      this.rotation.yaw += this._steer * rate * dt * Math.sign(this.speed || 1);
     }
 
     const prev = { x: this.position.x, z: this.position.z };
@@ -131,8 +134,9 @@ export class VehicleController {
     const expectedZ = prev.z + dz;
     const pushed = Math.hypot(this.position.x - expectedX, this.position.z - expectedZ);
     if (pushed > 0.05 && Math.abs(this.speed) > 4) {
+      const impact = Math.abs(this.speed);
+      this.crashShake = Math.min(1, impact / 10 + 0.4);
       this.speed *= 0.25;
-      this.crashShake = Math.min(1, Math.abs(this.speed) / 10 + 0.4);
       state.emitSound({
         position: { ...this.position },
         intensity: 1,

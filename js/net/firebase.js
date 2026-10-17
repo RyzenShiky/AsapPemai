@@ -98,7 +98,9 @@ export class MultiplayerRoom {
     this.unsubs = [];
     this.remotePlayers = {};
     this.remoteMonsters = {};
-    this.remoteSounds = [];
+    this.remoteSounds = v.soundEvents
+        ? Object.values(v.soundEvents).flatMap((s) => (s.list || []).map((e) => ({ ...e, by: s.by, t: e.id })))
+        : [];
     this.remoteVehicles = {};
     this.remotePickups = {};
     this.remoteClaims = {};
@@ -250,6 +252,32 @@ export class MultiplayerRoom {
     });
   }
 
+  writeSounds(list) {
+    return set(ref(this.db, `rooms/${this.code}/soundEvents/${this.uid}`), {
+      by: this.uid, t: Date.now(),
+      list: (list || []).map((e) => ({
+        id: e.id, x: e.position.x, y: e.position.y || 0, z: e.position.z,
+        intensity: e.intensity, radius: e.radius, type: e.type,
+      })),
+    });
+  }
+
+  writeDoor(id, open) {
+    if (!this.code || !id) return Promise.resolve();
+    return set(ref(this.db, `rooms/${this.code}/doors/${id}`), !!open);
+  }
+
+  listenDoors(cb) {
+    if (!this.code || this._doorsListening) return;
+    this._doorsListening = true;
+    onValue(ref(this.db, `rooms/${this.code}/doors`), (snap) => {
+      const v = snap.val() || {};
+      for (const id of Object.keys(v)) {
+        try { cb?.(id, !!v[id]); } catch (e) { /* */ }
+      }
+    });
+  }
+
   sendChat(text, name) {
     if (Date.now() - (this._lc || 0) < 800) return Promise.resolve();
     this._lc = Date.now();
@@ -264,7 +292,9 @@ export class MultiplayerRoom {
   writePlayer(player) {
     const prev = this.remotePlayers[this.uid] || {};
     const eyeY = player.position.y;
-    const footY = eyeY - 1.7;
+    const footY = player.ridingVehicleId ? eyeY - 0.5
+                : player.moveState === 'crawl' || player.isDowned ? eyeY - 0.9
+                : eyeY - 1.7;
     const own = {
       x: player.position.x,
       y: eyeY,
@@ -277,6 +307,7 @@ export class MultiplayerRoom {
       name: prev.name || 'Player_' + this.uid.slice(-4),
       joinedAt: prev.joinedAt || Date.now(),
       fl: !!player.flashlight,
+      hiding: !!player.isHiding,
       pitch: +(player.rotation.pitch || 0).toFixed(2),
     };
     if (this.isHost || !this.remotePlayers[this.uid]) {

@@ -14,7 +14,7 @@ export function loadProfile() {
 }
 
 export function saveProfile(p) {
-  localStorage.setItem(KEY, JSON.stringify(p));
+  try { localStorage.setItem(KEY, JSON.stringify(p)); } catch (e) { /* */ }
 }
 
 export function ensureUid(profile) {

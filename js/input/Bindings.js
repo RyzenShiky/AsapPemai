@@ -17,7 +17,7 @@ export const binds = {
   ...JSON.parse(localStorage.getItem('longway_binds') || '{}'),
 };
 
-const save = () => localStorage.setItem('longway_binds', JSON.stringify(binds));
+const save = () => { try { localStorage.setItem('longway_binds', JSON.stringify(binds)); } catch (e) { /* */ } };
 
 /** Start listening for the next keypress and rebind `action`. Calls done(code). */
 export function rebind(action, done) {
