@@ -9,10 +9,16 @@ export class AudioManager {
     this.ctx = new AudioContext();
     this.master = this.ctx.createGain();
     this.sfx = this.ctx.createGain();
+    this.ambience = this.ctx.createGain();   // bus ducking
+    this.musicGain = this.ctx.createGain();  // slider volume musik
     this.sfx.connect(this.master);
+    this.ambience.connect(this.musicGain);   // music through volume slider
+    this.musicGain.connect(this.master);
     this.master.connect(this.ctx.destination);
     this.master.gain.value = 0.8;
     this.sfx.gain.value = 1;
+    this.ambience.gain.value = 1;
+    this.musicGain.gain.value = 0.55;
   }
 
   resume() {
@@ -321,5 +327,289 @@ export class AudioManager {
     o.start(t);
     o.stop(t + 4.6);
   }
+
+
+  setMusicVolume(v) {
+    if (this.musicGain) this.musicGain.gain.value = Math.max(0, Math.min(1, v));
+  }
+
+  _makeNoise(sec = 2) {
+    const n = Math.floor(this.ctx.sampleRate * sec);
+    const buf = this.ctx.createBuffer(1, n, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  _makeReverb() {
+    const ctx = this.ctx;
+    const convolver = ctx.createConvolver();
+    const len = Math.floor(ctx.sampleRate * 3.2);
+    const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let c = 0; c < 2; c++) {
+      const d = buf.getChannelData(c);
+      for (let i = 0; i < len; i++) {
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.2);
+      }
+    }
+    convolver.buffer = buf;
+    return convolver;
+  }
+
+  stopMusic(fade = 1.5) {
+    const mus = this._mus;
+    if (!mus || !this.ctx) return;
+    this._mus = null; // free slot so playMusic() can start again immediately
+    const t = this.ctx.currentTime;
+    try {
+      mus.out.gain.cancelScheduledValues(t);
+      mus.out.gain.setValueAtTime(mus.out.gain.value, t);
+      mus.out.gain.linearRampToValueAtTime(0.0001, t + fade);
+    } catch (e) { /* */ }
+    for (const id of mus.timers || []) clearTimeout(id);
+    mus.timers?.clear?.();
+    setTimeout(() => {
+      for (const o of mus.nodes || []) {
+        try { o.stop(); } catch (e) { /* */ }
+      }
+      try { mus.out.disconnect(); } catch (e) { /* */ }
+    }, (fade + 0.15) * 1000);
+  }
+
+  playMusic(fade = 3) {
+    if (!this.ctx || !this.ambience || this._mus) return;
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime;
+    const nodes = [];
+    const timers = new Set();
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t0);
+    out.gain.linearRampToValueAtTime(1, t0 + fade);
+    const dry = ctx.createGain();
+    dry.gain.value = 0.75;
+    const wet = ctx.createGain();
+    wet.gain.value = 0.5;
+    const rev = this._makeReverb();
+    out.connect(dry);
+    dry.connect(this.ambience);
+    out.connect(rev);
+    rev.connect(wet);
+    wet.connect(this.ambience);
+
+    const muffle = ctx.createBiquadFilter();
+    muffle.type = 'lowpass';
+    muffle.frequency.value = 1500;
+    muffle.Q.value = 0.5;
+    const body = ctx.createGain();
+    body.gain.value = 0.35;
+    body.connect(muffle);
+    muffle.connect(out);
+
+    this._mus = { out, nodes, timers };
+
+    const lfo = (freq, depth, target) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = freq;
+      g.gain.value = depth;
+      o.connect(g);
+      g.connect(target);
+      o.start();
+      nodes.push(o);
+    };
+
+    const swell = () => {
+      if (this._mus?.out !== out) return;
+      const t = ctx.currentTime;
+      const L = rnd(32, 42);
+      const g = body.gain;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.linearRampToValueAtTime(0.35, t + L * 0.25);
+      g.linearRampToValueAtTime(1.0, t + L * 0.45);
+      g.linearRampToValueAtTime(1.0, t + L * 0.65);
+      g.linearRampToValueAtTime(0.3, t + L * 0.8);
+      g.linearRampToValueAtTime(0.3, t + L);
+      const id = setTimeout(() => {
+        timers.delete(id);
+        swell();
+      }, L * 1000);
+      timers.add(id);
+    };
+    swell();
+
+    const droneLP = ctx.createBiquadFilter();
+    droneLP.type = 'lowpass';
+    droneLP.frequency.value = 520;
+    droneLP.Q.value = 3;
+    const droneGain = ctx.createGain();
+    droneGain.gain.value = 0.16;
+    droneLP.connect(droneGain);
+    droneGain.connect(body);
+    [
+      [123.47, 'sawtooth', 6],
+      [123.47, 'sawtooth', -6],
+      [61.74, 'sine', 0],
+      [185.0, 'triangle', 0],
+      [246.94, 'sine', 0],
+    ].forEach(([f, type, cents]) => {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      o.detune.value = cents;
+      o.connect(droneLP);
+      o.start();
+      nodes.push(o);
+    });
+    lfo(0.07, 150, droneLP.frequency);
+    lfo(0.05, 0.05, droneGain.gain);
+
+    const padLP = ctx.createBiquadFilter();
+    padLP.type = 'lowpass';
+    padLP.frequency.value = 900;
+    padLP.connect(body);
+    [185.0, 246.94, 293.66, 311.13, 369.99].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = i % 2 ? 'triangle' : 'sine';
+      o.frequency.value = f;
+      o.detune.value = (Math.random() - 0.5) * 20;
+      const g = ctx.createGain();
+      g.gain.value = 0.04;
+      o.connect(g);
+      g.connect(padLP);
+      lfo(0.03 + Math.random() * 0.06, 0.03, g.gain);
+      o.start();
+      nodes.push(o);
+    });
+
+    const throbG = ctx.createGain();
+    throbG.gain.value = 0.05;
+    const th = ctx.createOscillator();
+    th.type = 'triangle';
+    th.frequency.value = 123.47;
+    th.connect(throbG);
+    throbG.connect(body);
+    th.start();
+    nodes.push(th);
+    lfo(1.133, 0.05, throbG.gain);
+
+    const noiseBuf = this._makeNoise(3);
+
+    const boom = () => {
+      const t = ctx.currentTime;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(rnd(70, 90), t);
+      o.frequency.exponentialRampToValueAtTime(32, t + 2.5);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.5, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 3);
+      o.connect(g);
+      g.connect(body);
+      o.start(t);
+      o.stop(t + 3.1);
+    };
+
+    const shimmer = () => {
+      const t = ctx.currentTime;
+      const dur = rnd(4, 7);
+      const f = rnd(500, 900);
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f, t);
+      o.frequency.linearRampToValueAtTime(f * rnd(0.94, 1.06), t + dur);
+      const vib = ctx.createOscillator();
+      vib.frequency.value = rnd(4, 7);
+      const vg = ctx.createGain();
+      vg.gain.value = f * 0.01;
+      vib.connect(vg);
+      vg.connect(o.frequency);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.03, t + dur * 0.5);
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      o.connect(g);
+      g.connect(body);
+      o.start(t);
+      vib.start(t);
+      o.stop(t + dur + 0.1);
+      vib.stop(t + dur + 0.1);
+    };
+
+    const whoosh = () => {
+      const t = ctx.currentTime;
+      const dur = rnd(3, 5);
+      const src = ctx.createBufferSource();
+      src.buffer = noiseBuf;
+      src.loop = true;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.Q.value = 6;
+      const f0 = rnd(150, 350);
+      bp.frequency.setValueAtTime(f0, t);
+      bp.frequency.exponentialRampToValueAtTime(f0 * rnd(2.5, 4), t + dur);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.12, t + dur * 0.5);
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(body);
+      src.start(t);
+      src.stop(t + dur + 0.1);
+    };
+
+    const SCALE = [246.94, 261.63, 293.66, 329.63, 369.99, 392.0, 440.0];
+    const pluckNote = (f, delay = 0) => {
+      const t = ctx.currentTime + delay;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      const o2 = ctx.createOscillator();
+      o2.type = 'triangle';
+      o2.frequency.value = f * 2.01;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.11, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 3.5);
+      const g2 = ctx.createGain();
+      g2.gain.value = 0.25;
+      o.connect(g);
+      o2.connect(g2);
+      g2.connect(g);
+      g.connect(body);
+      o.start(t);
+      o2.start(t);
+      o.stop(t + 3.6);
+      o2.stop(t + 3.6);
+    };
+    const pluck = () => {
+      const f = pick(SCALE);
+      pluckNote(f);
+      if (Math.random() < 0.4) pluckNote(f * 1.0595, rnd(0.35, 0.65));
+    };
+
+    const schedule = (fn, minS, maxS) => {
+      const loop = () => {
+        const id = setTimeout(() => {
+          timers.delete(id);
+          if (this._mus?.out !== out) return;
+          fn();
+          loop();
+        }, rnd(minS, maxS) * 1000);
+        timers.add(id);
+      };
+      loop();
+    };
+    schedule(pluck, 4, 9);
+    schedule(boom, 20, 40);
+    schedule(shimmer, 14, 30);
+    schedule(whoosh, 14, 30);
+  }
+
 
 }

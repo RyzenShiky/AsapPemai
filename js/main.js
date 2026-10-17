@@ -1,3 +1,4 @@
+import { BUILDING_DEFS, DOORS, setDoor, camsFor } from './core/Buildings.js';
 import { GameState } from './core/GameState.js';
 import { Clock } from './core/Clock.js';
 import { buildColliders, buildSpatialGrid } from './core/Collision.js';
@@ -28,7 +29,7 @@ import { MultiplayerRoom, roomCode as genRoomCode, initFirebase, deviceUid, uplo
 import { AudioManager } from './audio/AudioManager.js';
 import { Renderer } from './renderer/Renderer.js';
 import { TouchControls } from './input/TouchControls.js';
-import { binds, rebind, resetBinds } from './input/Bindings.js';
+import { binds, rebind, resetBinds, keyLabel } from './input/Bindings.js';
 import {
   getAuth, GoogleAuthProvider, signInWithPopup,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js';
@@ -134,6 +135,7 @@ async function init() {
       document.querySelectorAll('.color-swatch').forEach((s) => s.classList.remove('selected'));
       el.classList.add('selected');
       profile.avatarColor = el.dataset.color;
+      saveProfile(profile);
     });
   });
 
@@ -184,9 +186,12 @@ async function init() {
         if (st) st.textContent = 'Hanya host yang boleh upload';
         return;
       }
-      if (!file.type.startsWith('image/')) { if (st) st.textContent = 'Hanya gambar'; return; }
-      const type = 'image';
-      const url = await imageToDataUrl(file);
+      const isVideo = file.type === 'video/mp4', isImage = file.type.startsWith('image/');
+      if (!isVideo && !isImage) { if (st) st.textContent = 'Hanya gambar atau MP4'; return; }
+      const type = isVideo ? 'video' : 'image';
+      const url = isVideo
+        ? (room ? await uploadBillboardMedia(file, code) : URL.createObjectURL(file))
+        : await imageToDataUrl(file);
       if (room) await room.setBillboard(url, type);
       else if (renderer) renderer.applyBillboardMedia({ url, type }, audio);
       if (st) st.textContent = 'OK';
@@ -427,6 +432,20 @@ function renderLobbyPlayers() {
   }
 }
 
+function refreshBindLabels() {
+  document.querySelectorAll('#bind-list [data-action]').forEach((row) => {
+    const btn = row.querySelector('.btn-bind');
+    if (btn) btn.textContent = keyLabel(binds[row.dataset.action]);
+  });
+}
+
+function syncControlsHelp() {
+  const touchMode = typeof inputMode === 'function' && inputMode() === 'touch';
+  document.getElementById('bind-list')?.classList.toggle('hidden', touchMode);
+  document.getElementById('btn-reset-binds')?.classList.toggle('hidden', touchMode);
+  document.getElementById('touch-guide')?.classList.toggle('hidden', !touchMode);
+}
+
 function addChat(m) {
   const log = document.getElementById('chat-log');
   if (!log) return;
@@ -494,7 +513,78 @@ async function leaveRoom() {
   renderer?.pruneRemotePlayers(new Set());
 }
 
+const cctv = {
+  on: false, hp: 0,
+  enter(tv) {
+    const def = BUILDING_DEFS.find((b) => b.id === tv.house);
+    if (!def || !renderer) return;
+    const cams = [...camsFor(def)];
+    if (tv.cam) cams.push(tv.cam);
+    renderer.enterCCTV(cams);
+    state.data.player.cctv = true;
+    this.on = true;
+    this.hp = state.data.player.health;
+    this.el ??= Object.assign(document.createElement('div'), { className: 'cctv' });
+    document.body.appendChild(this.el);
+    this.draw();
+  },
+  exit() {
+    renderer?.exitCCTV();
+    if (state?.data?.player) state.data.player.cctv = false;
+    this.on = false;
+    this.el?.remove();
+  },
+  draw() {
+    const c = renderer?.cctv;
+    if (!c || !this.el) return;
+    this.el.innerHTML = `<b>● REC</b> CAM ${c.i + 1}/${c.cams.length} — ${c.cams[c.i].name}<small>A/D ganti kamera · E atau Esc keluar</small>`;
+  },
+};
+let typedSecret = '';
+window.addEventListener('keydown', (e) => {
+  if (e.key.length === 1) typedSecret = (typedSecret + e.key.toLowerCase()).slice(-8);
+  if (!cctv.on) return;
+  if (e.code === 'KeyA' || e.code === 'ArrowLeft') { renderer.cycleCCTV(-1); cctv.draw(); }
+  if (e.code === 'KeyD' || e.code === 'ArrowRight') { renderer.cycleCCTV(1); cctv.draw(); }
+  if (e.code === 'Escape') cctv.exit();
+});
+
+function tryUse() {
+  const p = state?.data?.player;
+  if (!p || !player) return;
+  if (!player.keys.has(binds.interact)) { player._useLatch = false; return; }
+  if (player._useLatch || p.ridingVehicleId || p.isDowned) return;
+  if (/(tru|monst)e$/.test(typedSecret) || document.getElementById('billboard-panel')?.classList.contains('open')) return;
+  player._useLatch = true;
+  if (cctv.on) return cctv.exit();
+  const { x, z } = p.position;
+  const tv = renderer?.tvSpots?.find((s) => Math.hypot(s.x - x, s.z - z) < 1.8);
+  if (tv) return cctv.enter(tv);
+  const d = DOORS.find((dd) => Math.hypot(dd.x - x, dd.z - z) < 2.2);
+  if (d) {
+    setDoor(d, !d.open);
+    renderer?.setDoorOpen(d.id, d.open);
+  }
+}
+
+function tickDoorBash(dt) {
+  for (const d of DOORS) {
+    if (d.open) continue;
+    const m = state.data.monsters.find(
+      (mm) => mm.active !== false && mm.aiState === 'CHASE'
+        && Math.hypot(mm.position.x - d.x, mm.position.z - d.z) < 2.2
+    );
+    d.hp = m ? (d.hp ?? 3) - dt : 3;
+    if (d.hp <= 0) {
+      setDoor(d, true);
+      renderer?.setDoorOpen(d.id, true);
+    }
+  }
+}
+
 function wireUI(canvas) {
+  if (wireUI._uiWired) return;
+  wireUI._uiWired = true;
   // Login
   document.getElementById('btn-guest').addEventListener('click', async () => {
     const btn = document.getElementById('btn-guest');
@@ -655,13 +745,14 @@ function wireUI(canvas) {
     }
   });
   document.getElementById('btn-chat')?.addEventListener('click', openChat);
+  document.getElementById('chat-cancel')?.addEventListener('click', closeChat);
+  document.getElementById('chat-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitChat();
+  });
   document.getElementById('chat-input')?.addEventListener('keydown', (e) => {
     e.stopPropagation();
-    if (e.key === 'Escape') return closeChat();
-    if (e.key !== 'Enter') return;
-    const txt = e.target.value.trim();
-    if (txt && room) room.sendChat(txt, profile.displayName);
-    closeChat();
+    if (e.key === 'Escape') closeChat();
   });
 
   document.getElementById('btn-settings').addEventListener('click', () => {
@@ -692,6 +783,7 @@ function wireUI(canvas) {
   // Input mode select
   document.getElementById('input-mode-select')?.addEventListener('change', (e) => {
     setInputPref(e.target.value);
+    syncControlsHelp();
     // apply immediately if touch controls exist
     if (typeof touch !== 'undefined' && touch) {
       if (inputMode() === 'touch') touch.show();
@@ -717,22 +809,12 @@ function wireUI(canvas) {
     if (!btn) return;
     btn.addEventListener('click', () => {
       btn.textContent = 'Tekan tombol…';
-      rebind(a, (code) => {
-        btn.textContent = code || binds[a];
-        // refresh other labels in case of swap
-        document.querySelectorAll('#bind-list [data-action]').forEach((r) => {
-          const b = r.querySelector('.btn-bind');
-          if (b && r.dataset.action !== a) b.textContent = binds[r.dataset.action];
-        });
-      });
+      rebind(a, () => refreshBindLabels());
     });
   });
   document.getElementById('btn-reset-binds')?.addEventListener('click', () => {
     resetBinds();
-    document.querySelectorAll('#bind-list [data-action]').forEach((row) => {
-      const btn = row.querySelector('.btn-bind');
-      if (btn) btn.textContent = binds[row.dataset.action];
-    });
+    refreshBindLabels();
   });
 
   document.getElementById('btn-multi').addEventListener('click', () => {
@@ -849,6 +931,7 @@ function wireUI(canvas) {
   });
   document.getElementById('btn-menu').addEventListener('click', async () => {
     running = false;
+    audio?.stopMusic?.(1);
     hideTouch();
     await leaveRoom();
     document.getElementById('gameover-screen').classList.add('hidden');
@@ -864,6 +947,9 @@ function wireUI(canvas) {
   document.getElementById('vol-sfx').addEventListener('input', (e) => {
     audio.setSfxVolume(Number(e.target.value));
   });
+  document.getElementById('vol-music')?.addEventListener('input', (e) => {
+    audio.setMusicVolume(Number(e.target.value));
+  });
 }
 
 function showGameOver(win, keepRunning = false) {
@@ -875,6 +961,7 @@ function showGameOver(win, keepRunning = false) {
   document.exitPointerLock?.();
   audio?.setRain?.(false);
   audio?.setSanityFilter?.(0);
+  if (!keepRunning) audio?.stopMusic?.(2);
   if (state) state._lastRaining = false;
   document.getElementById('hud').classList.add('hidden');
   document.getElementById('gameover-screen').classList.remove('hidden');
@@ -1076,6 +1163,7 @@ function startLoop() {
   if (running) return;
   running = true;
   tryLandscapeLock();
+  try { audio.resume?.(); audio.playMusic?.(3); } catch (e) { /* */ }
   function step() {
     if (!running) return;
     const dt = Math.min(0.05, clock.tick()); // clamp: avoid spiral on lag spikes
@@ -1084,6 +1172,13 @@ function startLoop() {
 
     player.update(dt);
     tryVehicleInteract();
+    tryUse();
+    tickDoorBash(dt);
+    if (cctv.on) {
+      const pl = state.data.player;
+      if (pl.health < cctv.hp - 0.5 || pl.isDowned) cctv.exit();
+      else cctv.hp = pl.health;
+    }
     level?.update(state.data.player.position, dt, state.data.player, audio);
     try {
       const sc = LANDMARKS.summoningCircle, pl = state.data.player;

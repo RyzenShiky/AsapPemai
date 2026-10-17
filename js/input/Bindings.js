@@ -45,3 +45,22 @@ export const resetBinds = () => {
 export function isBound(code) {
   return Object.values(binds).includes(code);
 }
+
+const NAMED = {
+  ShiftLeft: 'Shift', ShiftRight: 'Shift', ControlLeft: 'Ctrl', ControlRight: 'Ctrl',
+  AltLeft: 'Alt', AltRight: 'Alt', Space: 'Spasi', Enter: 'Enter', Tab: 'Tab',
+  Backspace: '⌫', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
+  Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']',
+  Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Backslash: '\\',
+};
+
+/** 'KeyW' -> 'W', 'ShiftLeft' -> 'Shift' */
+export function keyLabel(code) {
+  if (!code) return '—';
+  if (NAMED[code]) return NAMED[code];
+  let m;
+  if ((m = /^Key([A-Z])$/.exec(code))) return m[1];
+  if ((m = /^Digit(\d)$/.exec(code))) return m[1];
+  if ((m = /^Numpad(.+)$/.exec(code))) return 'Num ' + m[1];
+  return code;
+}

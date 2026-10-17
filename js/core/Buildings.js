@@ -1,7 +1,26 @@
-const DOOR_W = 1.7;
+export const DOOR_W = 1.7;
+export const DOOR_H = 2.3;
 const WALL_T = 0.35;
 
 /** Billboard facing road. */
+export const DOORS = [];
+export const setDoor = (d, open) => { d.open = open; if (d.col) d.col.type = open ? 'door-open' : 'wall'; };
+
+export function camsFor(def) {
+  const { x, z, w, d, h, door } = def;
+  const v = { s: [0, 1], n: [0, -1], e: [1, 0], w: [-1, 0] }[door] || [0, 1];
+  const hd = (v[0] ? w : d) / 2;
+  const yawOf = (dx, dz) => Math.atan2(-dx, -dz);
+  const P = (k, y, dx, dz, pitch, name) => ({
+    name, x: x + v[0] * k, y, z: z + v[1] * k, yaw: yawOf(dx, dz), pitch,
+  });
+  return [
+    P(-(hd - 0.7), h - 0.5, v[0], v[1], -0.28, 'RUANG TAMU'),
+    P(hd + 0.4, 3.1, v[0], v[1], -0.2, 'HALAMAN DEPAN'),
+    P(-(hd + 0.4), 3.1, -v[0], -v[1], -0.2, 'HALAMAN BELAKANG'),
+  ];
+}
+
 export const BILLBOARD = { x: 62, z: -34, yaw: 0, w: 36, h: 20, base: 4 };
 export const TV_HOUSES = ['tavern', 'store', 'house_1', 'house_3', 'house_5', 'house_9', 'house_11'];
 
@@ -61,7 +80,24 @@ export function buildingWallColliders(def) {
 
 export function allBuildingColliders() {
   const out = [];
-  for (const def of BUILDING_DEFS) out.push(...buildingWallColliders(def));
+  DOORS.length = 0;
+  const WALL_T = 0.35;
+  for (const def of BUILDING_DEFS) {
+    out.push(...buildingWallColliders(def));
+    const { x, z, w, d, door } = def;
+    const ns = door === 'n' || door === 's';
+    const dx = door === 'e' ? w / 2 : door === 'w' ? -w / 2 : 0;
+    const dz = door === 's' ? d / 2 : door === 'n' ? -d / 2 : 0;
+    const col = {
+      minX: x + dx - (ns ? DOOR_W / 2 : WALL_T),
+      maxX: x + dx + (ns ? DOOR_W / 2 : WALL_T),
+      minZ: z + dz - (ns ? WALL_T : DOOR_W / 2),
+      maxZ: z + dz + (ns ? WALL_T : DOOR_W / 2),
+      type: 'wall',
+    };
+    out.push(col);
+    DOORS.push({ id: def.id, x: x + dx, z: z + dz, open: false, col });
+  }
   try {
     for (const sx of [-0.3, 0.3]) {
       const cx = BILLBOARD.x + sx * BILLBOARD.w;

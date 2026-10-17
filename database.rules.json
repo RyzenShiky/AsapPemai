@@ -26,6 +26,7 @@
             "isDowned": { ".validate": "newData.isBoolean()" },
             "health": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
             "name": { ".validate": "newData.isString() && newData.val().length <= 16" },
+            "color": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9a-fA-F]{6}$/)" },
             "$other": { ".validate": "$other.matches(/^(footY|moveState|downedTimer|ridingVehicleId|ridingRole|joinedAt|fl|pitch)$/) && (newData.isNumber() || (newData.isString() && newData.val().length < 40) || newData.isBoolean())" }
           }
         },
@@ -67,9 +68,12 @@
             ".validate": "newData.hasChildren(['pickupId','t'])"
           }
         },
+        "doors": {
+          "$id": { ".write": "auth != null", ".validate": "newData.isBoolean()" }
+        },
         "billboard": {
           ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid",
-          ".validate": "newData.hasChildren(['url','type','by','t']) && newData.child('url').isString() && newData.child('url').val().beginsWith('data:image/jpeg;base64,') && newData.child('url').val().length < 200000"
+          ".validate": "newData.hasChildren(['url','type','by','t']) && newData.child('url').isString() && newData.child('url').val().length < 200000 && ((newData.child('type').val() === 'image' && newData.child('url').val().beginsWith('data:image/jpeg;base64,')) || (newData.child('type').val() === 'video' && newData.child('url').val().beginsWith('https://firebasestorage.googleapis.com/')))"
         },
         "chat": {
           "$mid": {

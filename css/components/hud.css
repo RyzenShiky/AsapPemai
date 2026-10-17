@@ -238,3 +238,70 @@
 #bag-panel { min-width: 260px; max-width: 92vw; }
 .bag-btn { background: #222; color: #ddd; border: 1px solid #555; border-radius: 4px; padding: .25rem .6rem; margin: 2px; cursor: pointer; }
 #interact-prompt { position: fixed; bottom: 24%; left: 50%; transform: translateX(-50%); padding: .35rem .8rem; background: rgba(0,0,0,.7); color: #fc9; border-radius: 6px; font-size: .9rem; pointer-events: none; z-index: 30; }
+
+/* ---------- Vitals panel (labelled) ---------- */
+#vitals {
+  position: absolute; top: 2.4rem; left: 1rem; z-index: 20;
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 6px 8px; width: 150px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  pointer-events: none;
+}
+#vitals .vital { display: grid; grid-template-columns: 16px 46px 1fr; align-items: center; gap: 5px; }
+#vitals .v-ico { font-size: 11px; text-align: center; line-height: 1; }
+#vitals .v-lbl {
+  font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(232, 224, 213, 0.75); white-space: nowrap;
+}
+#vitals .v-track {
+  position: relative; left: auto; top: auto; bottom: auto; transform: none;
+  width: 100%; height: 6px; border-radius: 3px; overflow: hidden;
+  background: rgba(0, 0, 0, 0.6); border: 1px solid rgba(255, 255, 255, 0.15);
+}
+#vitals .v-track > div { border-radius: 2px; height: 100%; }
+#pill-throw::before { content: "🪨 Lempar "; }
+#pill-hide::before  { content: "🫥 "; }
+
+#chat-log { bottom: 150px; }
+#chat-log .chat-line {
+  margin-top: 2px; padding: 2px 6px; width: fit-content; max-width: 100%;
+  background: rgba(0, 0, 0, 0.45); border-radius: 4px; word-break: break-word;
+}
+#chat-log .chat-line b { color: #c9a227; font-weight: 600; }
+#chat-form {
+  position: absolute; top: 0.5rem; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 0.35rem; width: min(520px, calc(100vw - 9rem));
+  pointer-events: auto; z-index: 35;
+}
+#chat-form input {
+  flex: 1; min-width: 0; padding: 0.45rem 0.6rem; font-size: 16px;
+  background: rgba(0, 0, 0, 0.8); color: #fff; border: 1px solid #666; border-radius: 4px;
+}
+#chat-form button {
+  padding: 0.45rem 0.8rem; font-size: 0.85rem; color: #eee; cursor: pointer;
+  background: #3a1f1f; border: 1px solid #8b0000; border-radius: 4px;
+}
+#chat-form #chat-cancel { background: #222; border-color: #555; padding: 0.45rem 0.6rem; }
+
+.bind-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin: 8px 0; font-size: 0.9em; text-align: left; }
+.bind-list > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.btn-bind {
+  min-width: 3.2rem; padding: 0.2rem 0.6rem; font-weight: 700; color: #eee; cursor: pointer;
+  background: #1c1c1c; border: 1px solid #666; border-bottom-width: 3px; border-radius: 5px;
+}
+.btn-bind:hover { border-color: #c9a227; }
+.touch-guide-list { list-style: none; padding: 0; margin: 6px 0; text-align: left; font-size: 0.85rem; line-height: 1.6; max-width: 22rem; }
+.touch-guide-list b { color: #c9a227; }
+@media (max-width: 560px) { .bind-list { grid-template-columns: 1fr; } }
+@media screen and (orientation: landscape) and (max-height: 420px) {
+  #vitals { top: 1.9rem; left: 0.5rem; width: 128px; padding: 4px 6px; gap: 3px; }
+  #vitals .vital { grid-template-columns: 14px 40px 1fr; }
+  #vitals .v-lbl { font-size: 8px; }
+  #vitals .v-track { height: 5px; }
+}
+
+.cctv{position:fixed;inset:0;pointer-events:none;z-index:50;padding:16px;color:#9f9;font:14px monospace;
+ background:repeating-linear-gradient(0deg,rgba(0,30,0,.22) 0 1px,transparent 1px 3px),radial-gradient(transparent 55%,rgba(0,0,0,.7))}
+.cctv small{position:absolute;bottom:16px;left:16px;opacity:.7}

@@ -64,7 +64,7 @@ window.addEventListener('error', function (e) {
         <label>Display name
           <input type="text" id="profile-name" maxlength="16" placeholder="Your name" />
         </label>
-        <p class="subtitle" style="margin:0.5rem 0 0">Avatar color</p>
+        <p class="subtitle" style="margin:0.5rem 0 0">Warna karakter <span style="opacity:.6">(terlihat oleh pemain lain di Multiplayer)</span></p>
         <div class="color-row" id="color-row">
           <div class="color-swatch selected" data-color="#446688" style="background:#446688"></div>
           <div class="color-swatch" data-color="#8b4513" style="background:#8b4513"></div>
@@ -82,7 +82,20 @@ window.addEventListener('error', function (e) {
         <div class="fog-layer" aria-hidden="true"></div>
         <h1 class="flicker-title" data-text="LONGWAY">LONGWAY</h1>
         <p class="subtitle">Don't make a sound.</p>
-        <p class="subtitle" style="font-size:0.6rem;opacity:.5">Models via Sketchfab — Smily: Bento/Kritis (CC-BY). Cek lisensi Siren, Boiled, kendaraan, player sebelum publish komersial.</p>
+        <div class="credits" style="font-size:0.6rem;opacity:.65;max-width:28rem;margin:.4rem auto 0;line-height:1.35;text-align:left">
+          <strong style="opacity:.9">3D Model Credits</strong>
+          <p style="margin:.25rem 0">
+            "<a href="https://sketchfab.com/3d-models/horror-skunx-retexterd-siren-head-updated-bf94583b404349d8bfcd12010ef3522e" target="_blank" rel="noopener">Horror Skunx Retexterd Siren Head [UPDATED]</a>"
+            by <a href="https://sketchfab.com/HorrorBigGameRR" target="_blank" rel="noopener">Horror BigGameRR Green Screens</a>
+            — <a href="http://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.
+          </p>
+          <p style="margin:.25rem 0">
+            "<a href="https://sketchfab.com/3d-models/the-boiled-one-horror-game-boiled-one-64ce66c413fe4e5e92a48e8e02a83590" target="_blank" rel="noopener">The Boiled One: Horror Game - Boiled One</a>"
+            by <a href="https://sketchfab.com/MG_GameRips" target="_blank" rel="noopener">MG Rips</a>
+            — <a href="http://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener">CC BY-NC 4.0</a>.
+          </p>
+          <p style="margin:.25rem 0;opacity:.8">Smily: cek atribusi Sketchfab (biasanya CC-BY). Karakter Siren Head ciptaan Trevor Henderson; model Boiled One mungkin rip — hati-hati untuk rilis publik/komersial.</p>
+        </div>
         <p id="menu-player-name" class="subtitle"></p>
         <label class="mode-label">Mode
           <select id="game-mode">
@@ -139,10 +152,14 @@ window.addEventListener('error', function (e) {
       <div id="hud" class="hidden">
         <button id="btn-hud-settings" class="btn" type="button"
           style="position:absolute;top:.5rem;right:.5rem;min-width:0;padding:.4rem .7rem;z-index:30">⚙</button>
-        <div id="stamina-bar"><div id="stamina-fill"></div></div>
-        <div id="health-bar"><div id="health-fill"></div></div>
-        <div id="hunger-bar" class="need-bar" style="bottom:3.5rem"><div id="hunger-fill"></div></div>
-        <div id="thirst-bar" class="need-bar" style="bottom:4.2rem"><div id="thirst-fill"></div></div>
+        <div id="vitals" aria-label="Status karakter">
+          <div class="vital"><span class="v-ico">⚡</span><span class="v-lbl">Stamina</span><div id="stamina-bar" class="v-track"><div id="stamina-fill"></div></div></div>
+          <div class="vital"><span class="v-ico">❤</span><span class="v-lbl">Nyawa</span><div id="health-bar" class="v-track"><div id="health-fill"></div></div></div>
+          <div class="vital"><span class="v-ico">🍖</span><span class="v-lbl">Lapar</span><div id="hunger-bar" class="v-track"><div id="hunger-fill"></div></div></div>
+          <div class="vital"><span class="v-ico">💧</span><span class="v-lbl">Haus</span><div id="thirst-bar" class="v-track"><div id="thirst-fill"></div></div></div>
+          <div class="vital"><span class="v-ico">🔋</span><span class="v-lbl">Baterai</span><div id="battery-bar" class="v-track" title="Baterai senter"><div id="battery-fill"></div></div></div>
+          <div class="vital"><span class="v-ico">🧠</span><span class="v-lbl">Waras</span><div id="sanity-bar" class="v-track" title="Sanity"><div id="sanity-fill"></div></div></div>
+        </div>
         <div id="bag-hud" style="position:absolute;top:2.2rem;right:1rem;text-align:right;white-space:pre;font-size:.8rem;color:#cdb;text-shadow:0 0 4px #000"></div>
         <div id="bag-panel" class="hidden"></div>
         <div id="battery-bar" title="Battery"><div id="battery-fill"></div></div>
@@ -165,7 +182,11 @@ window.addEventListener('error', function (e) {
         </div>
         <button id="btn-chat" type="button" style="position:absolute;top:.5rem;right:3.6rem;z-index:30;pointer-events:auto;min-width:0;padding:.4rem .55rem">💬</button>
         <div id="chat-log"></div>
-        <input id="chat-input" class="hidden" maxlength="120" placeholder="Chat… (Enter kirim, Esc batal)" autocomplete="off" />
+        <form id="chat-form" class="hidden" autocomplete="off">
+          <input id="chat-input" maxlength="120" placeholder="Ketik pesan…" enterkeyhint="send" autocomplete="off" />
+          <button id="chat-send" type="submit">Kirim</button>
+          <button id="chat-cancel" type="button" aria-label="Tutup">✕</button>
+        </form>
         <div id="room-hud" class="hidden"></div>
       </div>
 
@@ -173,6 +194,7 @@ window.addEventListener('error', function (e) {
         <h2>Settings</h2>
         <label>Master Volume <input type="range" id="vol-master" min="0" max="1" step="0.01" value="0.8" /></label>
         <label>SFX Volume <input type="range" id="vol-sfx" min="0" max="1" step="0.01" value="1" /></label>
+        <label>Music Volume <input type="range" id="vol-music" min="0" max="1" step="0.01" value="0.55" /></label>
         <label>Input Mode
           <select id="input-mode-select">
             <option value="auto">Auto</option>
@@ -182,18 +204,31 @@ window.addEventListener('error', function (e) {
         </label>
         <label>Look Sensitivity <input type="range" id="look-sens" min="0.0005" max="0.008" step="0.0001" value="0.0022" /></label>
         <label><input type="checkbox" id="invert-y" /> Invert Y</label>
-        <div id="bind-list" style="margin:8px 0;font-size:0.9em">
-          <div data-action="forward">Forward: <button class="btn-bind" type="button">—</button></div>
-          <div data-action="back">Back: <button class="btn-bind" type="button">—</button></div>
-          <div data-action="left">Left: <button class="btn-bind" type="button">—</button></div>
-          <div data-action="right">Right: <button class="btn-bind" type="button">—</button></div>
-          <div data-action="run">Run: <button class="btn-bind" type="button">—</button></div>
-          <div data-action="crouch">Crouch: <button class="btn-bind" type="button">—</button></div>
-          <div data-action="flash">Flashlight: <button class="btn-bind" type="button">—</button></div>
-          <div data-action="hide">Hide: <button class="btn-bind" type="button">—</button></div>
-          <div data-action="throw">Throw: <button class="btn-bind" type="button">—</button></div>
-          <div data-action="lighter">Lighter: <button class="btn-bind" type="button">—</button></div>
-          <div data-action="interact">Interact: <button class="btn-bind" type="button">—</button></div>
+        <div id="touch-guide" class="hidden">
+          <p class="subtitle"><b>Kontrol layar sentuh</b></p>
+          <ul class="touch-guide-list">
+            <li><b>Joystick kiri</b> — berjalan</li>
+            <li><b>Geser layar kanan</b> — melihat sekitar</li>
+            <li><b>LARI</b> — tahan untuk berlari (boros stamina)</li>
+            <li><b>JONGKOK</b> — ketuk untuk jongkok</li>
+            <li><b>SEMBUNYI</b> — tempat sembunyi terdekat</li>
+            <li><b>LEMPAR</b> — alihkan monster</li>
+            <li><b>SENTER</b> / <b>KOREK</b> — nyalakan</li>
+            <li><b>AKSI</b> — interaksi / menolong teman</li>
+          </ul>
+        </div>
+        <div id="bind-list" class="bind-list">
+          <div data-action="forward"><span>Maju</span><button class="btn-bind" type="button">—</button></div>
+          <div data-action="back"><span>Mundur</span><button class="btn-bind" type="button">—</button></div>
+          <div data-action="left"><span>Kiri</span><button class="btn-bind" type="button">—</button></div>
+          <div data-action="right"><span>Kanan</span><button class="btn-bind" type="button">—</button></div>
+          <div data-action="run"><span>Lari (tahan)</span><button class="btn-bind" type="button">—</button></div>
+          <div data-action="crouch"><span>Jongkok</span><button class="btn-bind" type="button">—</button></div>
+          <div data-action="flash"><span>Senter</span><button class="btn-bind" type="button">—</button></div>
+          <div data-action="hide"><span>Sembunyi</span><button class="btn-bind" type="button">—</button></div>
+          <div data-action="throw"><span>Lempar benda</span><button class="btn-bind" type="button">—</button></div>
+          <div data-action="lighter"><span>Korek</span><button class="btn-bind" type="button">—</button></div>
+          <div data-action="interact"><span>Interaksi</span><button class="btn-bind" type="button">—</button></div>
         </div>
         <button id="btn-reset-binds" class="btn" type="button">Reset Keys</button>
         <button id="btn-settings-rotate" class="btn" type="button">Putar layar 90°</button>
@@ -215,13 +250,13 @@ window.addEventListener('error', function (e) {
   </div>
   <div id="billboard-panel" class="bb-panel" aria-hidden="true">
     <h3>Billboard</h3>
-    <p class="subtitle">Upload image / video / audio (host preferred)</p>
-    <input type="file" id="bb-file" accept="image/*,video/mp4,audio/mpeg,audio/mp3" />
+    <p class="subtitle">Upload foto / gambar atau video MP4 (host saja) (host preferred)</p>
+    <input type="file" id="bb-file" accept="image/*,video/mp4" />
     <button id="bb-upload" class="btn primary" type="button">Upload</button>
     <button id="bb-close" class="btn" type="button">Close</button>
     <p id="bb-status" class="subtitle"></p>
   </div>
-  <script type="module" src="./js/main.js?v=6.2.1"></script>
+  <script type="module" src="./js/main.js?v=6.5.2"></script>
 <div id="toast" class="hidden" style="position:fixed;bottom:12%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#eee;padding:.6rem 1.2rem;border-radius:6px;z-index:10000;font-size:.9rem;max-width:90%;text-align:center"></div>
 </body>
 </html>

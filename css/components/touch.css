@@ -50,3 +50,5 @@
   border-color: #8b0000;
 }
 #game-canvas { touch-action: none; }
+
+#touch-actions button { font-size: 9px; letter-spacing: 0.02em; }

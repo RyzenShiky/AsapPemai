@@ -27,13 +27,13 @@ export class TouchControls {
       </div>
       <div id="touch-look-zone"></div>
       <div id="touch-actions">
-        <button type="button" id="touch-hide" aria-label="Hide">HIDE</button>
-        <button type="button" id="touch-throw" aria-label="Throw">THROW</button>
-        <button type="button" id="touch-flash" aria-label="Flashlight">LIGHT</button>
+        <button type="button" id="touch-hide" aria-label="Hide">SEMBUNYI</button>
+        <button type="button" id="touch-throw" aria-label="Throw">LEMPAR</button>
+        <button type="button" id="touch-flash" aria-label="Flashlight">SENTER</button>
       <button type="button" id="touch-lighter">KOREK</button>
-        <button type="button" id="touch-crouch" aria-label="Crouch">CROUCH</button>
-        <button type="button" id="touch-run" aria-label="Run">RUN</button>
-        <button type="button" id="touch-revive" aria-label="Revive">E</button>
+        <button type="button" id="touch-crouch" aria-label="Crouch">JONGKOK</button>
+        <button type="button" id="touch-run" aria-label="Run">LARI</button>
+        <button type="button" id="touch-revive" aria-label="Revive">AKSI</button>
       </div>
     `;
     rootEl.appendChild(this.el);

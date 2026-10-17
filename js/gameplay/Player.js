@@ -309,6 +309,7 @@ export class PlayerController {
       return; // no footsteps while hiding
     }
 
+    if (p.cctv) { p.isRunning = false; p.moveState = 'idle'; return; }
     p.isCrouching = this._down('crouch');
     p.isRunning = this._down('run') && !p.isCrouching && p.stamina > 5;
 
