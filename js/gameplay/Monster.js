@@ -67,7 +67,7 @@ export class MonsterController {
         });
       }
     }
-    if (!list.length) return { uid: 'me', pos: me.position, hiding: !!rp.hiding, flash: false };
+    if (!list.length) return { uid: 'me', pos: me.position, hiding: !!me.isHiding, flash: !!me.flashlight };
     let best = null, bd = Infinity;
     for (const tg of list) {
       let d = Math.hypot(m.position.x - tg.pos.x, m.position.z - tg.pos.z);

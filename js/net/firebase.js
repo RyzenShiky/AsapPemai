@@ -6,7 +6,10 @@ import {
   getStorage, ref as sRef, uploadBytes, getDownloadURL,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-storage.js';
 import {
-  getAuth, signInAnonymously,
+  getAuth, signInAnonymously, initializeAuth,
+  indexedDBLocalPersistence, browserLocalPersistence,
+  browserSessionPersistence, inMemoryPersistence,
+  browserPopupRedirectResolver,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js';
 import { MAX_PLAYERS, ROSTER } from '../core/MonsterTypes.js';
 
@@ -29,6 +32,15 @@ const withTimeout = (p, ms) =>
 export function initFirebase() {
   if (db) return db;
   app = initializeApp(firebaseConfig);
+  try {
+    initializeAuth(app, {
+      persistence: [
+        indexedDBLocalPersistence, browserLocalPersistence,
+        browserSessionPersistence, inMemoryPersistence,
+      ],
+      popupRedirectResolver: browserPopupRedirectResolver,
+    });
+  } catch (e) { /* already */ }
   db = getDatabase(app);
   return db;
 }
@@ -43,12 +55,23 @@ export function getAppInstance() {
 }
 
 /** Wait for Firebase Auth; sign in anonymously if needed. Returns auth.uid. */
-export async function ensureAuthUid(ms = 12000) {
+export async function ensureAuthUid(ms = 20000) {
   initFirebase();
   const auth = getAuth(app);
-  await withTimeout(auth.authStateReady(), ms);
-  if (!auth.currentUser) await withTimeout(signInAnonymously(auth), ms);
-  return auth.currentUser.uid;
+  const withTimeout = (p, ms) => Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('auth-timeout'), { code: 'auth/timeout' })), ms)),
+  ]);
+  for (let i = 0; i < 3; i++) {
+    try {
+      await withTimeout(auth.authStateReady(), ms);
+      if (!auth.currentUser) await withTimeout(signInAnonymously(auth), ms);
+      return auth.currentUser.uid;
+    } catch (e) {
+      const hard = e.code && String(e.code).startsWith('auth/') && e.code !== 'auth/network-request-failed' && e.code !== 'auth/timeout';
+      if (i === 2 || hard) throw e;
+    }
+  }
 }
 
 export function getStorageRef() {
@@ -98,9 +121,7 @@ export class MultiplayerRoom {
     this.unsubs = [];
     this.remotePlayers = {};
     this.remoteMonsters = {};
-    this.remoteSounds = v.soundEvents
-        ? Object.values(v.soundEvents).flatMap((s) => (s.list || []).map((e) => ({ ...e, by: s.by, t: e.id })))
-        : [];
+    this.remoteSounds = [];
     this.remoteVehicles = {};
     this.remotePickups = {};
     this.remoteClaims = {};
@@ -124,6 +145,7 @@ export class MultiplayerRoom {
   async create() {
     this.isHost = true;
     await set(ref(this.db, `rooms/${this.code}/meta`), {
+      level: this.level || 'world',
       hostUid: this.uid,
       createdAt: Date.now(),
       started: false,
@@ -137,6 +159,12 @@ export class MultiplayerRoom {
     const snap = await get(ref(this.db, `rooms/${this.code}/meta`));
     if (!snap.exists()) throw new Error('Room not found');
     const meta = snap.val();
+    const want = meta?.level || 'world';
+    if (this.level !== undefined && want !== this.level) {
+      const err = new Error(`Host memakai map "${want}"`);
+      err.mapMismatch = want;
+      throw err;
+    }
     this.meta = meta;
     this.isHost = meta.hostUid === this.uid;
 
@@ -204,7 +232,9 @@ export class MultiplayerRoom {
       const v = snap.val() || {};
       this.remotePlayers = v.players || {};
       this.remoteMonsters = v.monster || {};
-      this.remoteSounds = v.soundEvents ? Object.values(v.soundEvents) : [];
+      this.remoteSounds = v.soundEvents
+        ? Object.values(v.soundEvents).flatMap((s) => (s.list || []).map((e) => ({ ...e, by: s.by, t: e.id })))
+        : [];
       this.gameStatus = v.game || { gameOver: false, win: false };
       this.remoteVehicles = v.vehicles || {};
       this.remotePickups = v.pickups || {};

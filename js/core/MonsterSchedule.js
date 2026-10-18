@@ -10,7 +10,7 @@ const rnd = (a, b) => {
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /** Base gap (seconds) between successive monster spawns. */
-const GAP = [20, 40];
+const GAP = [12, 25];
 
 function pickSpawn(players) {
   if (!players.length) return null;
@@ -67,24 +67,25 @@ export function updateSchedule(state, players, dayP, dayIndex, alwaysAll = false
   const gapLo = GAP[0] * gapMul;
   const gapHi = GAP[1] * gapMul;
 
-  state.data.monsters.forEach((m, i) => {
+  for (const [, i] of ranked) {
+    const m = state.data.monsters[i]; if (!m) continue;
     const cfg = MONSTER_TYPES[ROSTER[i]] || MONSTER_TYPES.shadow;
     const atNight =
       dayP >= (alwaysAll ? nightStart : cfg.nightAt) && dayP < 0.9;
     const want = force || (tonight.has(i) && atNight);
 
     // Optional soft start buffer
-    if (want && !m.active && !force && dayP < nightStart + 0.03) return;
+    if (want && !m.active && !force && dayP < nightStart + 0.03) continue;
 
     if (want && !m.active) {
-      if (!force && now < (state._nextSpawnAt || 0)) return;
+      if (!force && now < (state._nextSpawnAt || 0)) continue;
       // Delay next if anyone is chasing
       if (
         !force &&
         state.data.monsters.some((x) => x.active && (x.aiState === 'CHASE' || x.aiState === 'ATTACK'))
       ) {
-        state._nextSpawnAt = Math.max(state._nextSpawnAt || 0, now + 10);
-        return;
+        state._nextSpawnAt = Math.max(state._nextSpawnAt || 0, now + 4);
+        continue;
       }
       const p =
         (state._spawnFn ? state._spawnFn(players) : pickSpawn(players)) ||
@@ -108,5 +109,5 @@ export function updateSchedule(state, players, dayP, dayIndex, alwaysAll = false
         m.active = false;
       }
     }
-  });
+  }
 }

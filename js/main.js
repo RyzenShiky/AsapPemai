@@ -204,6 +204,10 @@ async function init() {
   {
     const st = document.getElementById('login-status');
     if (st) st.textContent = 'Siap — pilih Guest atau Google';
+    if (sessionStorage.getItem('autoGuest')) {
+      sessionStorage.removeItem('autoGuest');
+      setTimeout(() => bg?.click(), 50);
+    }
     const bg = document.getElementById('btn-guest');
     const bgg = document.getElementById('btn-google');
     if (bg) bg.disabled = false;
@@ -247,6 +251,17 @@ function refreshContinueBtn() {
 }
 
 function enterMenu() {
+  const pj = sessionStorage.getItem('pendingJoin');
+  if (!pj) sessionStorage.removeItem('joinTried');
+  if (pj) {
+    sessionStorage.removeItem('pendingJoin');
+    setTimeout(() => {
+      document.getElementById('btn-multi')?.click();
+      const jc = document.getElementById('join-code');
+      if (jc) jc.value = pj;
+      document.getElementById('btn-join')?.click();
+    }, 200);
+  }
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('menu-screen').classList.remove('hidden');
   document.getElementById('menu-player-name').textContent =
@@ -492,6 +507,7 @@ function submitChat() {
 }
 
 function enterLobby() {
+  sessionStorage.removeItem('joinTried');
   if (room) {
     room.onChat = addChat;
     room.listenDoors?.((id, open) => {
@@ -637,9 +653,25 @@ function tickDoorBash(dt) {
   }
 }
 
+const currentMap = () => {
+  const l = new URLSearchParams(location.search).get('level');
+  return (typeof LEVELS !== 'undefined' && LEVELS[l]) ? l : 'world';
+};
+function switchMap(id) {
+  const u = new URL(location.href);
+  if (id === 'world') u.searchParams.delete('level'); else u.searchParams.set('level', id);
+  if (profile?.provider !== 'google') sessionStorage.setItem('autoGuest', '1');
+  location.href = u.toString();
+}
+
 function wireUI(canvas) {
   if (wireUI._uiWired) return;
   wireUI._uiWired = true;
+  const ms = document.getElementById('map-select');
+  if (ms) {
+    ms.value = currentMap();
+    ms.addEventListener('change', () => switchMap(ms.value));
+  }
   // Login
   document.getElementById('btn-guest').addEventListener('click', async () => {
     const btn = document.getElementById('btn-guest');
@@ -894,7 +926,8 @@ function wireUI(canvas) {
       for (let i = 0; i < 3; i++) {
         try {
           room = new MultiplayerRoom(genRoomCode(), true);
-          await room.create();
+          room.level = currentMap();
+      await room.create();
           break;
         } catch (e) {
           room = null;
@@ -925,6 +958,7 @@ function wireUI(canvas) {
     if (!code) return alert('Enter room code');
     try {
       room = new MultiplayerRoom(code, false);
+      room.level = currentMap();
       await room.join();
       const { ref, update } = await import('https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js');
       const { getDb } = await import('./net/firebase.js');
@@ -933,6 +967,17 @@ function wireUI(canvas) {
       });
       enterLobby();
     } catch (e) {
+      room = null;
+      if (e.mapMismatch && (e.mapMismatch === 'world' || (typeof LEVELS !== 'undefined' && LEVELS[e.mapMismatch])) && !sessionStorage.getItem('joinTried')) {
+        sessionStorage.setItem('joinTried', '1');
+        sessionStorage.setItem('pendingJoin', code);
+        if (profile?.provider !== 'google') sessionStorage.setItem('autoGuest', '1');
+        const u = new URL(location.href);
+        if (e.mapMismatch === 'world') u.searchParams.delete('level');
+        else u.searchParams.set('level', e.mapMismatch);
+        location.href = u.toString();
+        return;
+      }
       alert(e.message || 'Join failed');
     }
   });
@@ -1224,6 +1269,10 @@ function tryVehicleInteract() {
 function startLoop() {
   if (running) return;
   running = true;
+  window.__mon = () => (state?.data?.monsters || []).map((m, i) => {
+    const R = (typeof ROSTER !== 'undefined' ? ROSTER : ['shadow','smily','boiled','siren']);
+    return `${R[i] || i}: ${m.active ? m.aiState : 'off'}`;
+  });
   tryLandscapeLock();
   try { audio.resume?.(); audio.playMusic?.(3); } catch (e) { /* */ }
   let locKey = '', locEl = null;

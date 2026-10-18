@@ -414,10 +414,10 @@ export class Renderer {
   _fallbackMonster() {
     const g = new THREE.Group();
     const matBody = new THREE.MeshStandardMaterial({
-      color: 0x010101,
+      color: 0x14161c,
+      emissive: 0x05060a,
       roughness: 1,
       metalness: 0,
-      emissive: 0x000000,
     });
     const matEye = new THREE.MeshStandardMaterial({
       color: 0xffffff,
@@ -625,18 +625,24 @@ export class Renderer {
 
   _updateRain(dt, camPos) {
     if (!this.rainMesh || !this._rainOn || !this._rainPosArr) return;
-    // Follow camera (cheap)
     this.rainMesh.position.set(camPos.x, camPos.y - 2, camPos.z);
-    // Update only half the drops per frame (interleaved) — ~2× cheaper
     this._rainFrame = (this._rainFrame + 1) % 2;
-    const arr = this._rainPosArr;
-    const speeds = this._rainSpeeds;
-    const n = this._rainCount;
-    const fall = dt;
+    const arr = this._rainPosArr, speeds = this._rainSpeeds, n = this._rainCount;
+    const cx = camPos.x, cz = camPos.z, baseY = camPos.y - 2;
+    const near = (this._rainNear ||= []); near.length = 0;
+    for (const b of BUILDING_DEFS)
+      if (Math.abs(b.x - cx) < 45 && Math.abs(b.z - cz) < 45) near.push(b);
     for (let i = this._rainFrame; i < n; i += 2) {
       const yi = i * 3 + 1;
-      arr[yi] -= speeds[i] * fall;
-      if (arr[yi] < -2) {
+      arr[yi] -= speeds[i] * dt;
+      let reset = arr[yi] < -2;
+      if (!reset && near.length) {
+        const wx = cx + arr[i * 3], wz = cz + arr[i * 3 + 2], wy = baseY + arr[yi];
+        for (const b of near) {
+          if (wy < b.h + 0.3 && Math.abs(wx - b.x) < b.w / 2 && Math.abs(wz - b.z) < b.d / 2) { reset = true; break; }
+        }
+      }
+      if (reset) {
         arr[yi] = 18 + Math.random() * 6;
         arr[i * 3] = (Math.random() - 0.5) * 36;
         arr[i * 3 + 2] = (Math.random() - 0.5) * 36;

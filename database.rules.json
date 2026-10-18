@@ -9,6 +9,7 @@
         "meta": {
           ".write": "auth != null && (!data.exists() || !data.child('hostUid').exists() || data.child('hostUid').val() === auth.uid)",
           ".validate": "newData.hasChild('createdAt')",
+          "level": { ".validate": "newData.isString() && newData.val().length <= 24" },
           "hostUid": { ".validate": "newData.isString() && newData.val() === auth.uid" },
           "createdAt": { ".validate": "newData.isNumber()" },
           "started": { ".validate": "newData.isBoolean()" },
@@ -33,7 +34,12 @@
         "soundEvents": {
           "$uid": {
             ".write": "auth != null && auth.uid === $uid",
-            ".validate": "newData.hasChildren(['x','z','intensity','radius','type','t'])"
+            ".validate": "newData.hasChildren(['t','list'])",
+            "list": {
+              "$i": {
+                ".validate": "newData.hasChildren(['x','z','intensity','radius','type','id'])"
+              }
+            }
           }
         },
         "monster": {
