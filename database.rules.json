@@ -96,12 +96,14 @@
           ".validate": "newData.hasChildren(['phase','target','t'])"
         },
         "pickChoice": {
+          ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid",
           "$uid": {
             ".write": "auth != null && auth.uid === $uid",
             ".validate": "newData.hasChildren(['type','t']) && newData.child('type').isString() && newData.child('type').val().length <= 16"
           }
         },
         "pickAct": {
+          ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid",
           "$uid": {
             ".write": "auth != null && auth.uid === $uid",
             ".validate": "newData.hasChildren(['k','n','t'])"

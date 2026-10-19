@@ -76,6 +76,7 @@ export class PlayerController {
       if (inputMode() === 'mouse') canvas.requestPointerLock?.();
     }, opt);
     document.addEventListener('pointerlockchange', () => {
+      if (!document.pointerLockElement && typeof window.__openPause === 'function') try { window.__openPause(); } catch (e) {}
       this.pointerLocked = document.pointerLockElement === canvas;
     }, opt);
     document.addEventListener('mousemove', (e) => {

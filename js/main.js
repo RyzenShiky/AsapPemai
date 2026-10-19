@@ -41,6 +41,7 @@ let renderer, player, monsters, audio, clock, state, colliders, touch;
 let running = false;
 let room = null;
 let mission = null, tutorial = null, subs = null, pickOne = null;
+let paused = false;
 let mode = 'solo';
 let netWriteAcc = 0;
 let profile = loadProfile();
@@ -1154,26 +1155,27 @@ function wireUI(canvas) {
     hideTouch();
     await leaveRoom();
     mode = 'solo';
-    await setupLocalGame(false);
-    pickOne = room.meta?.mode === 'pickone' ? new PickOne({ room, state, controllers: () => monsters }) : null;
-    if (pickOne && room.isHost) pickOne.hostBegin();
-    await audio.resume();
-    document.getElementById('room-hud').classList.add('hidden');
-    document.getElementById('hud').classList.remove('hidden');
-    document.getElementById('game-canvas').focus();
-    startLoop();
+    try {
+      await setupLocalGame(false);
+      await audio.resume();
+      document.getElementById('room-hud').classList.add('hidden');
+      document.getElementById('hud').classList.remove('hidden');
+      document.getElementById('game-canvas').focus();
+      startLoop();
+    } catch (e) {
+      console.error(e);
+      exitToMenu();
+    }
   });
-  document.getElementById('btn-menu').addEventListener('click', async () => {
-    running = false;
-    audio?.stopMusic?.(1);
-    hideTouch();
-    await leaveRoom();
-    document.getElementById('gameover-screen').classList.add('hidden');
-    document.getElementById('hud').classList.add('hidden');
-    document.getElementById('room-hud').classList.add('hidden');
-    document.getElementById('menu-screen').classList.remove('hidden');
-    refreshContinueBtn();
+  document.getElementById('btn-menu')?.addEventListener('click', () => exitToMenu());
+  document.getElementById('btn-pause-resume')?.addEventListener('click', () => resumeFromPause());
+  document.getElementById('btn-pause-settings')?.addEventListener('click', () => {
+    settingsFromGame = true;
+    document.getElementById('pause-overlay')?.classList.add('hidden');
+    document.getElementById('btn-settings')?.click();
   });
+  document.getElementById('btn-pause-menu')?.addEventListener('click', () => exitToMenu());
+  document.getElementById('btn-hud-menu')?.addEventListener('click', () => openPause());
 
   document.getElementById('vol-master').addEventListener('input', (e) => {
     audio.setMasterVolume(Number(e.target.value));
@@ -1184,6 +1186,41 @@ function wireUI(canvas) {
   document.getElementById('vol-music')?.addEventListener('input', (e) => {
     audio.setMusicVolume(Number(e.target.value));
   });
+}
+
+async function exitToMenu() {
+  running = false;
+  paused = false;
+  audio?.stopMusic?.(1);
+  hideTouch();
+  document.getElementById('pause-overlay')?.classList.add('hidden');
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  document.exitPointerLock?.();
+  try { await leaveRoom(); } catch (e) { /* */ }
+  document.getElementById('gameover-screen')?.classList.add('hidden');
+  document.getElementById('hud')?.classList.add('hidden');
+  document.getElementById('room-hud')?.classList.add('hidden');
+  document.getElementById('menu-screen')?.classList.remove('hidden');
+  refreshContinueBtn?.();
+}
+
+function openPause() {
+  if (!running || state?.data?.progress?.gameOver) return;
+  if (document.getElementById('chat-form') && !document.getElementById('chat-form').classList.contains('hidden')) return;
+  if (document.getElementById('settings-screen') && !document.getElementById('settings-screen').classList.contains('hidden')) return;
+  document.exitPointerLock?.();
+  if (mode === 'solo') paused = true;
+  document.getElementById('pause-overlay')?.classList.remove('hidden');
+  if (typeof touch !== 'undefined' && touch) touch.hide?.();
+}
+
+window.__openPause = () => { if (running && !paused) openPause(); };
+window.__longwayRunning = false;
+function resumeFromPause() {
+  paused = false;
+  document.getElementById('pause-overlay')?.classList.add('hidden');
+  document.getElementById('game-canvas')?.focus();
+  if (typeof touch !== 'undefined' && touch && inputMode() === 'touch') touch.show?.();
 }
 
 function showGameOver(win, keepRunning = false) {
@@ -1394,6 +1431,7 @@ function tryVehicleInteract() {
 }
 
 function startLoop() {
+  window.__longwayRunning = true;
   if (running) return;
   running = true;
   window.__mon = () => (state?.data?.monsters || []).map((m, i) => {
@@ -1404,7 +1442,7 @@ function startLoop() {
   try { audio.resume?.(); audio.playMusic?.(3); } catch (e) { /* */ }
   let locKey = '', locEl = null;
   function step() {
-    if (!running) return;
+    if (!running || paused) return;
     const dt = Math.min(0.05, clock.tick()); // clamp: avoid spiral on lag spikes
     const now = performance.now() / 1000;
     const isAuthority = mode === 'solo' || (room && room.isHost);

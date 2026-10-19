@@ -328,7 +328,7 @@ export class MultiplayerRoom {
 
   clearPick() {
     if (!this.isHost) return Promise.resolve();
-    return Promise.all(
+    return Promise.allSettled(
       ['pick', 'pickChoice', 'pickAct'].map((k) => set(ref(this.db, `rooms/${this.code}/${k}`), null))
     );
   }

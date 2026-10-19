@@ -166,7 +166,8 @@ window.addEventListener('error', function (e) {
       <div id="lightning-flash" class="hidden" style="position:fixed;inset:0;background:#fff;opacity:0.85;pointer-events:none;z-index:9998"></div>
     <div id="jumpscare-overlay" class="hidden" aria-hidden="true"></div>
       <div id="hud" class="hidden">
-        <button id="btn-hud-settings" class="btn" type="button"
+        <button id="btn-hud-menu" class="btn" type="button" style="position:absolute;top:.5rem;right:3.2rem;min-width:0;padding:.4rem .7rem">☰</button>
+<button id="btn-hud-settings" class="btn" type="button"
           style="position:absolute;top:.5rem;right:.5rem;min-width:0;padding:.4rem .7rem;z-index:30">⚙</button>
         <div id="vitals" aria-label="Status karakter">
           <div class="vital"><span class="v-ico">⚡</span><span class="v-lbl">Stamina</span><div id="stamina-bar" class="v-track"><div id="stamina-fill"></div></div></div>
@@ -273,7 +274,15 @@ window.addEventListener('error', function (e) {
     <button id="bb-close" class="btn" type="button">Close</button>
     <p id="bb-status" class="subtitle"></p>
   </div>
-  <script type="module" src="./js/main.js?v=7.5.1"></script>
+  <script type="module" src="./js/main.js?v=7.6"></script>
 <div id="toast" class="hidden" style="position:fixed;bottom:12%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#eee;padding:.6rem 1.2rem;border-radius:6px;z-index:10000;font-size:.9rem;max-width:90%;text-align:center"></div>
+
+  <div id="pause-overlay" class="screen hidden" style="z-index:55;background:rgba(0,0,0,.72)">
+    <h2>Jeda</h2>
+    <p style="opacity:.7;margin-bottom:1rem">Solo: game dijeda. Multi: dunia tetap jalan.</p>
+    <button id="btn-pause-resume" class="btn primary" type="button">Lanjut</button>
+    <button id="btn-pause-settings" class="btn" type="button">Pengaturan</button>
+    <button id="btn-pause-menu" class="btn" type="button">Keluar ke Menu</button>
+  </div>
 </body>
 </html>

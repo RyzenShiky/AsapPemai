@@ -60,16 +60,24 @@ export class PickOne {
     const r = this.room;
     if (!r.isHost) return;
     const uids = Object.keys(r.remotePlayers || {});
-    if (uids.length < PICK.MIN_PLAYERS) return;
-    await r.clearPick();
-    const t0 = this.now() + PICK.LOAD_GRACE_MS;
-    await r.writePick({
-      phase: 'spin',
-      order: shuffle([...uids]),
-      target: uids[(Math.random() * uids.length) | 0],
-      at: t0,
-      until: t0 + PICK.SPIN_MS,
-    });
+    if (uids.length < PICK.MIN_PLAYERS) {
+      alert(`Pick One butuh minimal ${PICK.MIN_PLAYERS} pemain (sekarang ${uids.length}).`);
+      return;
+    }
+    try {
+      await r.clearPick();
+      const t0 = this.now() + PICK.LOAD_GRACE_MS;
+      await r.writePick({
+        phase: 'spin',
+        order: shuffle([...uids]),
+        target: uids[(Math.random() * uids.length) | 0],
+        at: t0,
+        until: t0 + PICK.SPIN_MS,
+      });
+    } catch (e) {
+      console.error('Pick One gagal mulai', e);
+      alert('Pick One gagal mulai: ' + (e.code || e.message));
+    }
   }
 
   _advance(pk, patch) {
@@ -89,7 +97,8 @@ export class PickOne {
         if (now >= pk.until) this._advance(pk, { phase: 'choose', until: now + PICK.CHOOSE_MS });
         break;
       case 'choose': {
-        const c = r.remotePickChoice?.[pk.target];
+        let c = r.remotePickChoice?.[pk.target];
+        if (c && c.t < pk.at - 5000) c = null;
         if (c || now >= pk.until) {
           const random = !c || !ROSTER.includes(c.type);
           const type = random ? ROSTER[(Math.random() * ROSTER.length) | 0] : c.type;
@@ -147,7 +156,7 @@ export class PickOne {
 
     const ctl = this.controllers()[idx];
     const act = r.remotePickAct?.[pk.target];
-    if (act && act.n !== this._actSeen) {
+    if (act && act.t >= pk.at - 5000 && act.n !== this._actSeen) {
       this._actSeen = act.n;
       if (ctl && act.k === 'atk' && ctl.attackCooldown <= 0) {
         m.aiState = 'CHASE';
