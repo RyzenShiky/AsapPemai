@@ -312,3 +312,15 @@
 .cctv .cctv-ui button { min-width: 64px; padding: 12px 16px; font-size: 16px; color: #cfc;
   background: rgba(0,30,0,.55); border: 1px solid #4a4; border-radius: 8px; touch-action: manipulation; }
 .cctv .cctv-ui button:active { background: rgba(40,120,40,.7); }
+
+#mission-hud { position: absolute; top: 3.4rem; left: 50%; transform: translateX(-50%); width: min(340px, 86vw); padding: .55rem .8rem; background: rgba(0,0,0,.62); border-left: 3px solid var(--color-accent, #c33); color: #e8e8e8; font-size: .82rem; text-shadow: 0 0 4px #000; pointer-events: none; z-index: 20; }
+#mission-hud .m-kicker { opacity: .6; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; }
+#mission-hud .m-title { font-weight: 700; margin: .1rem 0; }
+#mission-hud .m-bar { height: 3px; background: #333; margin: .4rem 0; }
+#mission-hud .m-bar i { display: block; height: 100%; width: 0; background: var(--color-accent, #c33); transition: width .3s; }
+#mission-hud .m-foot { display: flex; gap: .5rem; align-items: center; opacity: .85; }
+#mission-hud .m-arrow { display: inline-block; transition: transform .15s; }
+#mission-prompt { position: fixed; bottom: 28%; left: 50%; transform: translateX(-50%); padding: .35rem .8rem; background: rgba(0,0,0,.72); color: #fc9; border-radius: 6px; z-index: 30; pointer-events: none; }
+#tutorial-tip { position: fixed; bottom: 18%; left: 50%; transform: translateX(-50%); max-width: 88vw; padding: .5rem 1rem; background: rgba(0,0,0,.78); color: #fff; border-radius: 6px; text-align: center; z-index: 30; pointer-events: none; }
+
+#story-sub { position: fixed; bottom: 9%; left: 50%; transform: translateX(-50%); max-width: min(720px, 90vw); padding: .6rem 1rem; background: rgba(0,0,0,.72); color: #ddd; font-style: italic; text-align: center; border-radius: 6px; z-index: 40; pointer-events: none; }

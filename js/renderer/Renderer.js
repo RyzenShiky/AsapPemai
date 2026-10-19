@@ -9,6 +9,7 @@ import { VEHICLE_FACE } from '../gameplay/Vehicle.js';
 import { BUILDING_DEFS, nearBuilding, BILLBOARD, TV_HOUSES, DOOR_W, DOOR_H, DOORS, setDoor, camsFor } from '../core/Buildings.js';
 import { recommendGraphics } from '../core/Device.js';
 import { groundHeight } from '../core/Collision.js';
+import { itemMeshFor } from './ItemModels.js';
 
 export class Renderer {
   constructor() {
@@ -231,7 +232,15 @@ export class Renderer {
       mesh.userData.face = cfg.face ?? 0;
       return { mesh, clips: [] };
     }
-    const g = await loader.loadAsync('./assets/' + cfg.glb);
+    let g;
+    try {
+      g = await loader.loadAsync('./assets/' + cfg.glb);
+    } catch (e) {
+      console.warn('Monster GLB missing', cfg.glb, e);
+      const mesh = this._fallbackMonster();
+      mesh.userData.face = cfg.face ?? 0;
+      return { mesh, clips: [] };
+    }
     const model = g.scene;
     model.updateMatrixWorld(true);
     let box = new THREE.Box3().setFromObject(model, true);
@@ -1054,20 +1063,10 @@ export class Renderer {
 
   syncPickups(pickups) {
     this._pk ??= new Map();
-    const col = { container: 0x5a4630, generator: 0x806020, board: 0x3a5a7a, dropoff: 0x3a7a5a };
     for (const [id, pk] of Object.entries(pickups || {})) {
       let m = this._pk.get(id);
       if (!m) {
-        const big = pk.kind === 'container' || pk.kind === 'generator';
-        m = new THREE.Mesh(
-          new THREE.BoxGeometry(big ? 0.9 : 0.35, big ? 0.6 : 0.35, big ? 0.6 : 0.35),
-          new THREE.MeshStandardMaterial({
-            color: col[pk.kind] ?? 0xd0b060,
-            emissive: pk.kind ? 0x000000 : 0x302008,
-          })
-        );
-        const y = typeof groundHeight === 'function' ? groundHeight(pk.x, pk.z) + 0.3 : 0.3;
-        m.position.set(pk.x, y, pk.z);
+        m = itemMeshFor(pk, id, groundHeight(pk.x, pk.z));
         this.scene.add(m);
         this._pk.set(id, m);
       }
@@ -1282,12 +1281,70 @@ export class Renderer {
   }
 
   setDoorOpen(id, o) {
-    if (this.doors[id]) this.doors[id].open = o;
+    const d = this.doors[id];
+    if (d && !d.broken) d.open = o;
   }
+
+  doorFx(id, style, ph) {
+    const d = this.doors?.[id];
+    if (!d || d.broken || style === 'phase') return;
+    if (!d.fx || d.fx.style !== style) d.fx = { style, ph, t: 0, idle: 0 };
+    d.fx.ph = ph;
+    d.fx.idle = 0;
+  }
+
+  breakDoor(id, dx = 0, dz = 1, instant = false) {
+    const d = this.doors?.[id];
+    if (!d || d.broken) return;
+    d.broken = true;
+    d.open = true;
+    d.fx = null;
+    if (instant) { d.pivot.visible = false; return; }
+    const s = Math.random() < 0.5 ? -1 : 1;
+    d.fly = {
+      t: 0, y0: d.pivot.position.y,
+      vx: dx * 8 - dz * s * 3, vy: 5.5, vz: dz * 8 + dx * s * 3,
+      rx: (Math.random() - 0.5) * 10, ry: (Math.random() - 0.5) * 8, rz: (Math.random() - 0.5) * 10,
+    };
+  }
+
   updateDoors(dt) {
     for (const d of Object.values(this.doors || {})) {
+      const p = d.pivot;
+      if (!p) continue;
+      if (d.broken) {
+        const f = d.fly;
+        if (!f || !p.visible) continue;
+        f.t += dt;
+        f.vy -= 14 * dt;
+        p.position.x += f.vx * dt;
+        p.position.y += f.vy * dt;
+        p.position.z += f.vz * dt;
+        p.rotation.x += f.rx * dt;
+        p.rotation.y += f.ry * dt;
+        p.rotation.z += f.rz * dt;
+        if (p.position.y < f.y0 && f.vy < 0) {
+          p.position.y = f.y0;
+          f.vy *= -0.3; f.vx *= 0.5; f.vz *= 0.5;
+        }
+        if (f.t > 4) p.visible = false;
+        continue;
+      }
+      if (d.fx) {
+        d.fx.t += dt;
+        d.fx.idle += dt;
+        if (d.fx.idle > 0.4) d.fx = null;
+        else {
+          const { style, ph, t } = d.fx;
+          const shake = Math.sin(t * 55) * (style === 'smash' ? 0.05 : 0.025);
+          let target = d.closed + shake;
+          if (style === 'stab' && ph >= 1) target = d.closed - 0.9 + shake * 2;
+          p.rotation.y += (target - p.rotation.y) * Math.min(1, dt * 18);
+          continue;
+        }
+      }
       const target = d.closed - (d.open ? Math.PI / 2 : 0);
-      d.pivot.rotation.y += (target - d.pivot.rotation.y) * Math.min(1, dt * 8);
+      p.rotation.y += (target - p.rotation.y) * Math.min(1, dt * 8);
     }
   }
   enterCCTV(cams) { this.cctv = { cams, i: 0 }; }
@@ -1430,6 +1487,55 @@ export class Renderer {
     this._updateRemoteFlash(uid, data);
   }
 
+
+  /** Visual pillars/beacons for mission anchors (panels, generator, exit). */
+  spawnMissionMarkers(anchors, flat = false) {
+    this.clearMissionMarkers();
+    this._missionMarkers = [];
+    if (!anchors) return;
+    for (const [id, a] of Object.entries(anchors)) {
+      const g = new THREE.Group();
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.18, 2.2, 8),
+        new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.9 })
+      );
+      pole.position.y = 1.1;
+      const bulb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.28, 10, 10),
+        new THREE.MeshBasicMaterial({ color: id.startsWith('p') || id === 'exit' ? 0x66ffaa : 0xffcc44 })
+      );
+      bulb.position.y = 2.35;
+      g.add(pole, bulb);
+      g.position.set(a.x, flat ? 0 : groundHeight(a.x, a.z), a.z);
+      g.userData.missionId = id;
+      this.scene.add(g);
+      this._missionMarkers.push(g);
+    }
+  }
+
+  setMissionMarkersVisible(v) {
+    for (const g of this._missionMarkers || []) g.visible = !!v;
+  }
+
+  clearMissionMarkers() {
+    for (const g of this._missionMarkers || []) {
+      this.scene.remove(g);
+      g.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+    }
+    this._missionMarkers = [];
+  }
+
+  updateMissionMarkers(done = {}) {
+    for (const g of this._missionMarkers || []) {
+      const id = g.userData.missionId;
+      const bulb = g.children[1];
+      if (!bulb?.material) continue;
+      if (done[id]) bulb.material.color.setHex(0x444444);
+      else if (id === 'exit' || id === 'extract') bulb.material.color.setHex(0x66aaff);
+      else bulb.material.color.setHex(0x66ffaa);
+    }
+  }
+
   pruneRemotePlayers(activeUids) {
     for (const uid of Object.keys(this.remoteMeshes)) {
       if (!activeUids.has(uid)) {
@@ -1550,7 +1656,7 @@ export class Renderer {
     state.monsters.forEach((mon, i) => {
       const mesh = this.monsterMeshes[i];
       if (!mesh) return;
-      mesh.visible = mon.active !== false;
+      mesh.visible = mon.active !== false && !mon.hideFromSelf;
       if (!mesh.visible) return;
       mesh.position.set(mon.position.x, mon.position.y || 0, mon.position.z);
       mesh.rotation.y = mon.rotation.yaw + (mesh.userData.face ?? Math.PI);

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildSpatialGrid } from './Collision.js';
 import { WORLD_FLAGS } from './WorldConfig.js';
 
@@ -372,13 +373,336 @@ registerLevel('backrooms0', {
   },
 });
 
+
+/* ====================== LEVEL 37 — POOLROOMS ====================== */
+const P_H = 3.8, P_WT = 0.15, P_DOOR = 2.4, P_DOOR_H = 2.5, P_COL = 0.42, P_SEG = 30;
+const P_TILE = 2.4, P_WATER = 0, P_BASE = 0.14, P_SLOPE = 2.4, P_DEEP = 0.95, P_FLOOR = -1.3;
+const P_AMB = 2.5, P_LIGHT = 22, P_GRID = 8;
+const P_HALL = 0, P_LANES = 1, P_ROUND = 2, P_FLOOD = 3;
+
+const pmod = (a, n) => ((a % n) + n) % n;
+const sstep = (a, b, x) => smooth(Math.min(1, Math.max(0, (x - a) / (b - a))));
+
+const pType = (cx, cz) => {
+  if (cz === 0 && (cx === 0 || cx === -1)) return P_HALL;
+  const r = h(cx, cz, 371);
+  return r < 0.28 ? P_HALL : r < 0.50 ? P_LANES : r < 0.72 ? P_ROUND : P_FLOOD;
+};
+
+const pPool = (x, z) => {
+  const cx = Math.floor(x / CH), cz = Math.floor(z / CH);
+  const u = x - cx * CH, v = z - cz * CH, t = pType(cx, cz);
+  if (t === P_HALL) {
+    const ins = 5.4 + h(cx, cz, 372) * 1.2;
+    return P_DEEP * sstep(0, P_SLOPE, Math.min(u - ins, CH - ins - u, v - ins, CH - ins - v));
+  }
+  if (t === P_LANES) {
+    const [a, b] = h(cx, cz, 373) < 0.5 ? [u, v] : [v, u];
+    const lane = (b0, b1) => Math.min(a - 3.6, CH - 3.6 - a, b - b0, b1 - b);
+    return P_DEEP * 0.9 * sstep(0, P_SLOPE, Math.max(lane(3.6, 8.4), lane(15.6, 20.4)));
+  }
+  if (t === P_ROUND) {
+    const R = 7.2 + h(cx, cz, 374) * 1.2;
+    return P_DEEP * sstep(0, P_SLOPE, R - Math.hypot(u - 12, v - 12));
+  }
+  const edgeD = Math.min(u, v, CH - u, CH - v);
+  const hx = 8.4 + h(cx, cz, 375) * 7.2, hz = 8.4 + h(cx, cz, 376) * 7.2;
+  return 0.3 * sstep(0, 3, edgeD) + 0.45 * sstep(0, 2.4, 3.2 - Math.hypot(u - hx, v - hz));
+};
+const pDepth = (x, z) => P_BASE + pPool(x, z);
+
+const pInner = (i, j, ax) => {
+  if (h(i * 7 + 3, j * 13 + 5, ax + 390) >= 0.34) return 0;
+  return h(i * 5 + 1, j * 11 + 9, ax + 395) < 0.7 ? 2 : 1;
+};
+const pEdge = (i, j, ax) => {
+  const bi = pmod(i, CPC), bj = pmod(j, CPC), ci = Math.floor(i / CPC), cj = Math.floor(j / CPC);
+  const k = ax === 1 ? bi : bj;
+  if ((ax === 1 ? bj : bi) === 0) {
+    if (h(ci, cj, 380 + ax) < 0.28) return k >= 1 && k <= 3 ? 3 : 1;
+    return k === 2 ? 2 : 1;
+  }
+  return pType(ci, cj) === P_FLOOD ? pInner(i, j, ax) : 0;
+};
+
+function path37(start, goal, maxNodes = 700) {
+  const si = Math.floor(start.x / CELL), sj = Math.floor(start.z / CELL);
+  const gi = Math.floor(goal.x / CELL), gj = Math.floor(goal.z / CELL);
+  if (si === gi && sj === gj) return [{ x: goal.x, z: goal.z }];
+  const hc = (i, j) => (Math.abs(i - gi) + Math.abs(j - gj)) * CELL;
+  const open = new MinHeap(), closed = new Set(), info = new Map(), sk = ck(si, sj);
+  info.set(sk, { g: 0, p: null, gap: null, i: si, j: sj });
+  open.push({ i: si, j: sj, g: 0, f: hc(si, sj) });
+  let best = sk, bestH = hc(si, sj), reached = false, n = 0;
+  while (open.size && n++ < maxNodes) {
+    const cur = open.pop(), k = ck(cur.i, cur.j);
+    if (closed.has(k)) continue;
+    closed.add(k);
+    const hh = hc(cur.i, cur.j);
+    if (hh < bestH) { bestH = hh; best = k; }
+    if (cur.i === gi && cur.j === gj) { best = k; reached = true; break; }
+    const { i, j } = cur;
+    for (const [ni, nj, e, gx, gz] of [
+      [i, j - 1, pEdge(i, j, 1), i * CELL + CELL / 2, j * CELL],
+      [i, j + 1, pEdge(i, j + 1, 1), i * CELL + CELL / 2, (j + 1) * CELL],
+      [i - 1, j, pEdge(i, j, 2), i * CELL, j * CELL + CELL / 2],
+      [i + 1, j, pEdge(i + 1, j, 2), (i + 1) * CELL, j * CELL + CELL / 2],
+    ]) {
+      if (e === 1) continue;
+      const nk = ck(ni, nj), g = cur.g + CELL + (e === 2 ? 1.5 : 0), old = info.get(nk);
+      if (closed.has(nk) || (old && old.g <= g)) continue;
+      info.set(nk, { g, p: k, gap: e === 2 ? { x: gx, z: gz } : null, i: ni, j: nj });
+      open.push({ i: ni, j: nj, g, f: g + hc(ni, nj) });
+    }
+  }
+  if (best === sk) return null;
+  const out = [];
+  for (let k = best; k !== sk;) {
+    const nd = info.get(k);
+    out.push({ x: (nd.i + 0.5) * CELL, z: (nd.j + 0.5) * CELL });
+    if (nd.gap) out.push(nd.gap);
+    k = nd.p;
+  }
+  out.reverse();
+  out.unshift({ x: (si + 0.5) * CELL, z: (sj + 0.5) * CELL });
+  if (reached) out.push({ x: goal.x, z: goal.z });
+  return out;
+}
+
+const pdrawTile = (g, s, band) => {
+  const n = 4, t = s / n;
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    const v = 230 + ((rnd() * 10) | 0), blue = band && r === n - 1;
+    g.fillStyle = blue ? `rgb(${v - 40},${v - 6},${v - 2})` : `rgb(${v},${v + 6},${v + 6})`;
+    g.fillRect(c * t, r * t, t, t);
+    g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(c * t, r * t, t, 3); g.fillRect(c * t, r * t, 3, t);
+    g.fillStyle = 'rgba(60,100,110,.18)'; g.fillRect(c * t, (r + 1) * t - 4, t, 4); g.fillRect((c + 1) * t - 4, r * t, 4, t);
+  }
+  g.fillStyle = '#a9bcbd';
+  for (let k = 0; k <= n; k++) { g.fillRect(k * t - 1.5, 0, 3, s); g.fillRect(0, k * t - 1.5, s, 3); }
+  speckle(g, s, 3500, 0.05, 1.5);
+};
+const pdrawWater = (g, s) => {
+  g.fillStyle = 'rgb(118,204,214)'; g.fillRect(0, 0, s, s);
+  g.lineWidth = 2;
+  for (let k = 0; k < 110; k++) {
+    const x = rnd() * s, y = rnd() * s, r = 12 + rnd() * 34, q = 0.4 + rnd() * 0.4, a = rnd() * 3.14;
+    g.strokeStyle = `rgba(255,255,255,${0.1 + rnd() * 0.16})`;
+    for (const dx of [-s, 0, s]) for (const dy of [-s, 0, s]) {
+      g.beginPath(); g.ellipse(x + dx, y + dy, r, r * q, a, 0, 6.283); g.stroke();
+    }
+  }
+};
+
+let PM = null;
+const pMats = () => {
+  if (PM) return PM;
+  PM = {
+    floor: new THREE.MeshStandardMaterial({ map: makeTex((g, s) => pdrawTile(g, s, false), CH / P_TILE, CH / P_TILE), vertexColors: true, roughness: 0.3, metalness: 0.05 }),
+    wall: new THREE.MeshStandardMaterial({ map: makeTex((g, s) => pdrawTile(g, s, true), 1, 1), roughness: 0.38 }),
+    ceil: new THREE.MeshBasicMaterial({ map: makeTex((g, s) => pdrawTile(g, s, false), CH / P_TILE, CH / P_TILE), color: 0xe6f6f6, side: THREE.DoubleSide }),
+    water: new THREE.MeshStandardMaterial({
+      map: makeTex(pdrawWater, CH / 12, CH / 12), color: 0xb8f0f2, transparent: true, opacity: 0.55,
+      roughness: 0.05, metalness: 0.15, depthWrite: false, emissive: 0x1c6f78, emissiveIntensity: 0.55,
+    }),
+  };
+  return PM;
+};
+
+const ptbox = (x0, x1, y0, y1, z0, z1) => {
+  const g = boxGeo.clone();
+  g.scale(x1 - x0, y1 - y0, z1 - z0);
+  g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+  const P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv;
+  for (let k = 0; k < P.count; k++) {
+    const x = P.getX(k), y = P.getY(k), z = P.getZ(k);
+    if (Math.abs(N.getX(k)) > 0.5) U.setXY(k, z / P_TILE, y / P_TILE);
+    else if (Math.abs(N.getY(k)) > 0.5) U.setXY(k, x / P_TILE, z / P_TILE);
+    else U.setXY(k, x / P_TILE, y / P_TILE);
+  }
+  return g;
+};
+
+const pOut = (a) => a.sfx || a.master || a.ctx.destination;
+const pAmbience = (audio) => {
+  const ctx = audio.ctx, out = ctx.createGain(), src = [];
+  out.gain.value = 0; out.connect(pOut(audio));
+  const len = ctx.sampleRate * 2, buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const noise = (type, f, q, gain) => {
+    const s = ctx.createBufferSource(), fl = ctx.createBiquadFilter(), gn = ctx.createGain();
+    s.buffer = buf; s.loop = true; fl.type = type; fl.frequency.value = f; fl.Q.value = q; gn.gain.value = gain;
+    s.connect(fl); fl.connect(gn); gn.connect(out); s.start(); src.push(s);
+  };
+  noise('bandpass', 650, 0.5, 0.06);
+  noise('lowpass', 110, 0.7, 0.6);
+  const hum = ctx.createOscillator(), hg = ctx.createGain();
+  hum.type = 'sine'; hum.frequency.value = 50; hg.gain.value = 0.05; hum.connect(hg); hg.connect(out); hum.start(); src.push(hum);
+  const ir = ctx.createBuffer(2, ctx.sampleRate * 2.8, ctx.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const a = ir.getChannelData(c);
+    for (let i = 0; i < a.length; i++) a[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / a.length, 2.6);
+  }
+  const conv = ctx.createConvolver(), wet = ctx.createGain();
+  conv.buffer = ir; wet.gain.value = 0.9; conv.connect(wet); wet.connect(pOut(audio));
+  return { out, src, buf, conv, wet };
+};
+const pDrip = (audio, A) => {
+  const ctx = audio.ctx, now = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain(), f = 900 + Math.random() * 900;
+  o.type = 'sine'; o.frequency.setValueAtTime(f, now); o.frequency.exponentialRampToValueAtTime(f * 0.45, now + 0.14);
+  g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(0.09, now + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+  o.connect(g); g.connect(A.conv); g.connect(A.out);
+  o.start(now); o.stop(now + 0.25);
+};
+const pSplash = (audio, A, depth) => {
+  const ctx = audio.ctx, now = ctx.currentTime, s = ctx.createBufferSource(), fl = ctx.createBiquadFilter(), g = ctx.createGain();
+  s.buffer = A.buf; fl.type = 'bandpass'; fl.frequency.value = 1100 + Math.random() * 500; fl.Q.value = 0.8;
+  g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(0.05 + 0.1 * depth, now + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+  s.connect(fl); fl.connect(g); g.connect(pOut(audio)); g.connect(A.conv);
+  s.start(now, Math.random() * 1.5, 0.25);
+};
+
+registerLevel('backrooms37', {
+  fog: 0xbfe6e8, fogDensity: 0.024, humHz: 50, drain: 0.35, path: path37,
+
+  setup(m) {
+    WORLD_FLAGS.floorFn = (x, z) => -pDepth(x, z);
+    m.r.ambientLight?.color.setHex(0xe4fbff);
+    for (const s of m.pool) { s.L.color.setHex(0xeafdff); s.L.distance = 20; }
+    m._p = { drip: 2, step: 0, A: null, lt: 0 };
+  },
+
+  tick(m, pos, dt, p, audio) {
+    const S = m._p, amb = m.r.ambientLight;
+    if (amb) amb.intensity += (P_AMB - amb.intensity) * Math.min(1, dt * 2);
+    pMats().water.map.offset.set(m.t * 0.006, m.t * 0.004);
+
+    const gx = Math.floor(pos.x / P_GRID), gz = Math.floor(pos.z / P_GRID), cand = [];
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+      const lx = (gx + a + 0.5) * P_GRID, lz = (gz + b + 0.5) * P_GRID;
+      cand.push({ lx, lz, d2: (lx - pos.x) ** 2 + (lz - pos.z) ** 2 });
+    }
+    cand.sort((u, v) => u.d2 - v.d2);
+    const kk = 1 - Math.exp(-dt * 6);
+    m.pool.forEach((s, n) => {
+      const c = cand[n];
+      if (!c) return;
+      if (!s.init) { s.L.position.set(c.lx, P_H - 0.5, c.lz); s.init = true; }
+      else { s.L.position.x += (c.lx - s.L.position.x) * kk; s.L.position.z += (c.lz - s.L.position.z) * kk; }
+      s.L.intensity = P_LIGHT;
+    });
+
+    const d = pDepth(pos.x, pos.z);
+    const w = d - P_BASE;
+    if (p && !p.isHiding) p._weatherSpeed = 0.95 - 0.27 * Math.min(1, w / P_DEEP);
+
+    if (!audio?.ctx) return;
+    if (!S.A) S.A = pAmbience(audio);
+    const A = S.A;
+    A.out.gain.setTargetAtTime(0.5, audio.ctx.currentTime, 0.4);
+    if ((S.drip -= dt) <= 0) { pDrip(audio, A); S.drip = 1.5 + Math.random() * 5; }
+    if ((p?.moveState === 'walk' || p?.moveState === 'run') && (S.step -= dt) <= 0) {
+      pSplash(audio, A, w); S.step = p.moveState === 'run' ? 0.3 : 0.52;
+    }
+  },
+
+  teardown(m) {
+    WORLD_FLAGS.floorFn = null;
+    const A = m._p?.A;
+    if (A) { try { A.src.forEach((s) => s.stop()); A.out.disconnect(); A.wet.disconnect(); } catch (e) { /* */ } }
+  },
+
+  buildChunk(cx, cz) {
+    const M = pMats(), x0 = cx * CH, z0 = cz * CH, i0 = cx * CPC, j0 = cz * CPC, t = pType(cx, cz);
+    const boxes = [], hit = [], geos = [];
+    const solid = (a0, a1, b0, b1) => {
+      boxes.push([a0, a1, P_FLOOR, P_H, b0, b1]);
+      hit.push({ type: 'wall', minX: a0, maxX: a1, minZ: b0, maxZ: b1 });
+    };
+    const column = (x, z) => solid(x - P_COL, x + P_COL, z - P_COL, z + P_COL);
+    const beam = (a0, a1, b0, b1, y0 = P_DOOR_H) => boxes.push([a0, a1, y0, P_H, b0, b1]);
+    const da = (CELL - P_DOOR) / 2;
+
+    for (let i = i0; i < i0 + CPC; i++) for (let j = j0; j < j0 + CPC; j++) {
+      const px = i * CELL, pz = j * CELL;
+      const eN = pEdge(i, j, 1), eW = pEdge(i, j, 2);
+      if (eN === 1) solid(px - P_WT, px + CELL + P_WT, pz - P_WT, pz + P_WT);
+      else if (eN === 2) {
+        solid(px - P_WT, px + da, pz - P_WT, pz + P_WT);
+        solid(px + da + P_DOOR, px + CELL + P_WT, pz - P_WT, pz + P_WT);
+        beam(px + da, px + da + P_DOOR, pz - P_WT, pz + P_WT);
+      } else if (eN === 3) {
+        beam(px, px + CELL, pz - 0.25, pz + 0.25, 2.9);
+        if (pmod(i, CPC) >= 2) column(px, pz);
+      }
+      if (eW === 1) solid(px - P_WT, px + P_WT, pz - P_WT, pz + CELL + P_WT);
+      else if (eW === 2) {
+        solid(px - P_WT, px + P_WT, pz - P_WT, pz + da);
+        solid(px - P_WT, px + P_WT, pz + da + P_DOOR, pz + CELL + P_WT);
+        beam(px - P_WT, px + P_WT, pz + da, pz + da + P_DOOR);
+      } else if (eW === 3) {
+        beam(px - 0.25, px + 0.25, pz, pz + CELL, 2.9);
+        if (pmod(j, CPC) >= 2) column(px, pz);
+      }
+    }
+
+    if (t === P_HALL) {
+      const ins = 5.4 + h(cx, cz, 372) * 1.2, a = ins - 1.6, b = CH - ins + 1.6;
+      for (const u of [a, 6, 18, b]) for (const v of [a, b]) column(x0 + u, z0 + v);
+      for (const v of [6, 18]) { column(x0 + a, z0 + v); column(x0 + b, z0 + v); }
+    } else if (t === P_LANES) {
+      const hz = h(cx, cz, 373) < 0.5;
+      for (const a of [6, 12, 18]) for (const b of [9.6, 14.4]) column(x0 + (hz ? a : b), z0 + (hz ? b : a));
+    } else if (t === P_ROUND) {
+      const R = 7.2 + h(cx, cz, 374) * 1.2;
+      for (let k = 0; k < 8; k++) {
+        const an = (k + 0.5) * Math.PI / 4;
+        column(x0 + 12 + Math.cos(an) * (R + 2.2), z0 + 12 + Math.sin(an) * (R + 2.2));
+      }
+    }
+
+    for (const b of boxes) geos.push(ptbox(...b));
+    const group = new THREE.Group();
+    const wallGeo = geos.length ? mergeGeometries(geos) : new THREE.BufferGeometry();
+    geos.forEach((g) => g.dispose());
+    if (wallGeo.attributes.position) group.add(new THREE.Mesh(wallGeo, M.wall));
+
+    const fg = new THREE.PlaneGeometry(CH, CH, P_SEG, P_SEG).rotateX(-Math.PI / 2);
+    const fp = fg.attributes.position, col = new Float32Array(fp.count * 3);
+    for (let k = 0; k < fp.count; k++) {
+      const d = pDepth(x0 + CH / 2 + fp.getX(k), z0 + CH / 2 + fp.getZ(k)), q = Math.min(1, (d - P_BASE) / P_DEEP);
+      fp.setY(k, -d);
+      col[k * 3] = 1 - 0.45 * q; col[k * 3 + 1] = 1 - 0.18 * q; col[k * 3 + 2] = 1 - 0.08 * q;
+    }
+    fg.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    fg.computeVertexNormals();
+    const floor = new THREE.Mesh(fg, M.floor);
+    floor.position.set(x0 + CH / 2, 0, z0 + CH / 2);
+
+    const wg = new THREE.PlaneGeometry(CH, CH).rotateX(-Math.PI / 2);
+    const water = new THREE.Mesh(wg, M.water);
+    water.position.set(x0 + CH / 2, P_WATER, z0 + CH / 2);
+    water.renderOrder = 1;
+
+    const cg = new THREE.PlaneGeometry(CH, CH).rotateX(Math.PI / 2);
+    const ceil = new THREE.Mesh(cg, M.ceil);
+    ceil.position.set(x0 + CH / 2, P_H, z0 + CH / 2);
+
+    group.add(floor, water, ceil);
+    return { group, walls: hit, dispose() { wallGeo.dispose(); fg.dispose(); wg.dispose(); cg.dispose(); } };
+  },
+});
+
 export class LevelManager {
   constructor(renderer, id) {
     this.r = renderer;
     this.def = LEVELS[id];
     this.chunks = new Map();
     this.spatial = buildSpatialGrid([]);
-    this.spatial.levelPath = cellPath;
+    this._path = this.def.path || cellPath;
+    this.spatial.levelPath = this._path;
     this.spawn = (pos, min = 20, max = 70) => spawnCell(pos, min, Math.min(max, 70));
     this.patrol = patrolPoint;
     this._ck = '';
@@ -414,6 +738,7 @@ export class LevelManager {
       renderer.scene.add(L);
       this.pool.push({ L, init: false, off: false });
     }
+    this.def.setup?.(this);
   }
 
   update(pos, dt, p, audio) {
@@ -436,17 +761,21 @@ export class LevelManager {
         if (want.has(k)) continue;
         this.r.scene.remove(c.group);
         c.group.traverse((o) => { if (o.isInstancedMesh) o.dispose(); });
+        c.dispose?.();
         this.chunks.delete(k);
       }
       Object.assign(this.spatial, buildSpatialGrid([...this.chunks.values()].flatMap((c) => c.walls)));
-      this.spatial.levelPath = cellPath;
+      this.spatial.levelPath = this._path;
     }
     if (p && p.alive !== false) p.sanity = Math.max(0, (p.sanity ?? 100) - this.def.drain * dt);
 
-    this._flicker(dt);
-    this._lights(pos, dt, audio);
-    this._ambient(pos, dt);
-    this._hum(audio, p, pos);
+    if (this.def.tick) this.def.tick(this, pos, dt, p, audio);
+    else {
+      this._flicker(dt);
+      this._lights(pos, dt, audio);
+      this._ambient(pos, dt);
+      this._hum(audio, p, pos);
+    }
   }
 
   _flicker(dt) {
@@ -568,8 +897,10 @@ export class LevelManager {
     for (const c of this.chunks.values()) {
       this.r.scene.remove(c.group);
       c.group.traverse((o) => { if (o.isInstancedMesh) o.dispose(); });
+      c.dispose?.();
     }
     this.chunks.clear();
+    this.def.teardown?.(this);
     WORLD_FLAGS.endless = false;
   }
 }

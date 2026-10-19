@@ -13,6 +13,7 @@
           "hostUid": { ".validate": "newData.isString() && newData.val() === auth.uid" },
           "createdAt": { ".validate": "newData.isNumber()" },
           "started": { ".validate": "newData.isBoolean()" },
+          "mode": { ".validate": "newData.isString() && newData.val().length <= 12" },
           "$other": { ".validate": false }
         },
         "players": {
@@ -65,6 +66,16 @@
           "win": { ".validate": "newData.isBoolean()" },
           "t0": { ".validate": "newData.isNumber()" }
         },
+        "mission": {
+          ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid",
+          ".validate": "newData.hasChildren(['v','step','rev'])"
+        },
+        "missionActs": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.hasChildren(['n','target','t']) && newData.child('n').isNumber() && newData.child('target').isString() && newData.child('target').val().length <= 24"
+          }
+        },
         "pickups": {
           ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid"
         },
@@ -72,6 +83,28 @@
           "$uid": {
             ".write": "auth != null && auth.uid === $uid",
             ".validate": "newData.hasChildren(['pickupId','t'])"
+          }
+        },
+        "doorsBroken": {
+          "$id": {
+            ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid",
+            ".validate": "newData.isBoolean()"
+          }
+        },
+        "pick": {
+          ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid",
+          ".validate": "newData.hasChildren(['phase','target','t'])"
+        },
+        "pickChoice": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.hasChildren(['type','t']) && newData.child('type').isString() && newData.child('type').val().length <= 16"
+          }
+        },
+        "pickAct": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.hasChildren(['k','n','t'])"
           }
         },
         "doors": {

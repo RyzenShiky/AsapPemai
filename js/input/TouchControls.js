@@ -1,3 +1,4 @@
+import { binds } from './Bindings.js';
 import { applyLayout } from './UILayout.js';
 /**
  * Multi-touch: joystick (left) + look (right) + action buttons.
@@ -153,13 +154,14 @@ export class TouchControls {
       (e) => {
         e.preventDefault();
         e.stopPropagation();
-        this.keys.add('KeyE');
+        const ik = binds?.interact || 'KeyE';
+        this.keys.add(ik);
         this.btnRevive.classList.add('active');
       },
       { passive: false }
     );
     this.btnRevive.addEventListener('touchend', () => {
-      this.keys.delete('KeyE');
+      this.keys.delete(binds?.interact || 'KeyE');
       this.btnRevive.classList.remove('active');
     });
     this.btnLighter?.addEventListener('touchstart', (e) => {

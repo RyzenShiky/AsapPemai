@@ -11,6 +11,8 @@ import { nearestMonsterDist, heartFromDistance } from './gameplay/Proximity.js';
 import { LANDMARKS } from './core/WorldConfig.js';
 import { DAY_SECONDS, MATCH_SECONDS, phaseFromProgress, lightingForProgress, randomMonsterSpawn } from './core/DayCycle.js';
 import { ITEMS, RECIPES, SHOP, MAX_SLOTS, MAX_WEIGHT, canCraft, canCarry, invWeight, rollLoot, sellPrice, addItem, removeItems, countOf, NO_SELL } from './gameplay/Items.js';
+import { Mission, Tutorial, Subtitles, MISSIONS, validateAnchors } from './gameplay/Mission.js';
+import { PickOne } from './gameplay/PickOne.js';
 import { isInsideBuilding } from './core/Buildings.js';
 import { SanityManager } from './gameplay/Sanity.js';
 import { HallucinationDirector } from './gameplay/HallucinationDirector.js';
@@ -38,6 +40,7 @@ import {
 let renderer, player, monsters, audio, clock, state, colliders, touch;
 let running = false;
 let room = null;
+let mission = null, tutorial = null, subs = null, pickOne = null;
 let mode = 'solo';
 let netWriteAcc = 0;
 let profile = loadProfile();
@@ -82,9 +85,8 @@ async function imageToDataUrl(file, max = 768) {
 }
 
 function givePickupItem(pk, id = '') {
-  const p = state.data.player, inv = state.data.inventory;
-  inv ??= { slots: MAX_SLOTS, items: [] };
-  state.data.inventory = inv;
+  const p = state.data.player;
+  const inv = (state.data.inventory ??= { slots: MAX_SLOTS, items: [] });
   if (pk.kind === 'container') {
     const loot = rollLoot(pk.table || 'house', Math.round((pk.x || 0) * 7 + (pk.z || 0) * 13));
     let lost = 0;
@@ -297,6 +299,16 @@ async function setupLocalGame(fromSave = false) {
 
   const MONSTER_COUNT = ROSTER.length;
   state._level = level || null;
+  state._doorFx = (d, kind, dx, dz) => {
+    if (kind === 'open') {
+      setDoor(d, true);
+      renderer?.setDoorOpen(d.id, true);
+      room?.writeDoor?.(d.id, true);
+    } else {
+      breakDoor(d, dx, dz);
+      room?.writeDoorBroken?.(d.id);
+    }
+  };
   state._spawnFn = level
     ? (pl) => level.spawn(pl[(Math.random() * pl.length) | 0], 40, 80)
     : null;
@@ -330,7 +342,9 @@ async function setupLocalGame(fromSave = false) {
     for (let i = 0; i < MONSTER_COUNT; i++) {
       let spawn;
       for (let tries = 0; tries < 12; tries++) {
-        spawn = randomMonsterSpawn(state.data.player.position, 50 + i * 20, 120 + i * 30);
+        spawn = level
+          ? level.spawn(state.data.player.position, 25 + i * 10, 55 + i * 5)
+          : randomMonsterSpawn(state.data.player.position, 50 + i * 20, 120 + i * 30);
         if (used.every((u) => Math.hypot(u.x - spawn.x, u.z - spawn.z) > 40)) break;
       }
       used.push(spawn);
@@ -356,7 +370,8 @@ async function setupLocalGame(fromSave = false) {
   if (!resumed) {
     const modeEl = document.getElementById('game-mode');
     const dayEl = document.getElementById('day-limit');
-    state.data.world.gameMode = modeEl?.value === 'days' ? 'days' : 'endless';
+    const gm = modeEl?.value;
+    state.data.world.gameMode = ['days', 'mission', 'story'].includes(gm) ? gm : 'endless';
     state.data.world.dayLimit = Math.max(1, parseInt(dayEl?.value || '3', 10) || 3);
     if (room?.isHost) room.cfg = { mode: state.data.world.gameMode, dayLimit: state.data.world.dayLimit };
     state.data.world.daysSurvived = 0;
@@ -375,6 +390,22 @@ async function setupLocalGame(fromSave = false) {
   vehicleControllers = [];
   state.data.vehicles = [];
   hideJumpscare();
+
+  mission?.dispose(); tutorial?.dispose(); subs?.dispose();
+  pickOne?.dispose(); pickOne = null;
+  const mDef = MISSIONS[level ? 'backrooms0' : 'world'];
+  subs = new Subtitles(document.getElementById('hud'));
+  mission = new Mission(mDef, missionIO());
+  if (state.data.mission && state.data.mission.id === mDef.id) {
+    mission.s = { ...mission._fresh(), ...state.data.mission, done: state.data.mission.done || {}, contrib: {}, ack: {} };
+  } else {
+    mission.start();
+  }
+  tutorial = new Tutorial(document.getElementById('hud'));
+  renderer?.spawnMissionMarkers?.(mDef.anchors, !!level);
+  renderer?.updateMissionMarkers?.(mission.doneIds());
+  renderer?.setMissionMarkersVisible?.(mission.active);
+  if (level && level.id === 'backrooms0') { const bad = validateAnchors(mDef); if (bad?.length) console.warn('Anchor Backrooms tak terjangkau:', bad); }
 
   player.onThrow = (from, to) => {
     if (renderer && renderer.spawnThrowable) renderer.spawnThrowable(from, to);
@@ -510,6 +541,16 @@ function enterLobby() {
   sessionStorage.removeItem('joinTried');
   if (room) {
     room.onChat = addChat;
+    room.listenDoorsBroken?.((id) => {
+      const d = DOORS.find((x) => x.id === id);
+      if (d) breakDoor(d, 0, 1, true);
+    });
+    const modeSel = document.getElementById('sel-mode');
+    if (modeSel) {
+      modeSel.parentElement?.classList?.toggle('hidden', !room.isHost);
+      modeSel.value = room.meta?.mode || 'classic';
+      modeSel.onchange = () => room.setMode(modeSel.value);
+    }
     room.listenDoors?.((id, open) => {
       const d = DOORS.find((x) => x.id === id);
       if (d) setDoor(d, open);
@@ -527,6 +568,8 @@ function enterLobby() {
 }
 
 async function beginMultiGame() {
+  // pickOne wired after setupLocalGame below
+
   if (running || startingMulti || !room) return;
   startingMulti = true;
   room.onUpdate = null;
@@ -535,6 +578,8 @@ async function beginMultiGame() {
     document.getElementById('lobby-screen').classList.add('hidden');
     document.getElementById('loading-screen').classList.remove('hidden');
     await setupLocalGame(false);
+    pickOne = room.meta?.mode === 'pickone' ? new PickOne({ room, state, controllers: () => monsters }) : null;
+    if (pickOne && room.isHost) pickOne.hostBegin();
     await audio.resume();
     document.getElementById('loading-screen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
@@ -622,10 +667,12 @@ function tryUse() {
   // Door first (before TV / vehicle) — range 3.5 m
   let best = null, bd = 3.5;
   for (const dd of DOORS) {
+    if (dd.broken) continue;
     const dist = Math.hypot(dd.x - x, dd.z - z);
     if (dist < bd) { bd = dist; best = dd; }
   }
   if (best) {
+    if (pickOne?.isMonster()) { pickOne.doorBreach(best.id); return true; }
     setDoor(best, !best.open);
     renderer?.setDoorOpen(best.id, best.open);
     room?.writeDoor?.(best.id, best.open);
@@ -637,19 +684,97 @@ function tryUse() {
   return false;
 }
 
-function tickDoorBash(dt) {
-  for (const d of DOORS) {
-    if (d.open) continue;
-    const m = state.data.monsters.find(
-      (mm) => mm.active !== false && mm.aiState === 'CHASE'
-        && Math.hypot(mm.position.x - d.x, mm.position.z - d.z) < 2.2
-    );
-    d.hp = m ? (d.hp ?? 3) - dt : 3;
-    if (d.hp <= 0) {
-      setDoor(d, true);
-      renderer?.setDoorOpen(d.id, true);
-      room?.writeDoor?.(d.id, true);
-    }
+
+const net = () => (mode === 'multi' && room ? room : null);
+
+function missionIO() {
+  const P = () => state.data.player;
+  const me = () => ({ x: P().position.x, z: P().position.z, yaw: P().rotation.yaw, alive: P().alive !== false });
+  return {
+    uid: () => net()?.uid || 'local',
+    isHost: () => !net() || net().isHost,
+    enabled: () => ['mission', 'story'].includes(state.data.world.gameMode) || !!net()?.remoteMission,
+    story: () => state.data.world.gameMode === 'story',
+    say: (lines) => subs?.say(lines),
+    interactDown: () => player?.keys?.has(binds.interact),
+    local: me,
+    players: () => {
+      const uid = net()?.uid || 'local';
+      const others = Object.entries(net()?.remotePlayers || {})
+        .filter(([u]) => u !== uid)
+        .map(([u, p]) => ({ uid: u, x: p.x, z: p.z, alive: p.alive !== false }));
+      return [{ uid, ...me() }, ...others];
+    },
+    inv: () => state.data.inventory,
+    consume: (t) => removeItems(P(), state.data.inventory, t, 1),
+    loot: (item, from) => {
+      let best = null, bd = Infinity;
+      for (const pk of Object.values(state.data.pickups || {})) {
+        if (pk.taken || !(pk.type === item || pk.kind === 'container')) continue;
+        const d = Math.hypot(pk.x - from.x, pk.z - from.z);
+        if (d < bd) { bd = d; best = pk; }
+      }
+      return best;
+    },
+    remote: () => net()?.remoteMission || null,
+    acts: () => net()?.remoteMissionActs || {},
+    send: (a) => net()?.sendMissionAct(a),
+    publish: (s) => net()?.writeMission(s),
+    toast: (msg, ms) => { if (typeof toast === 'function') toast(msg, ms); },
+    onStep: (st) => {
+      if (st.surge) {
+        state._forceMonsters = true;
+        if (typeof toast === 'function') toast('Listrik menyala. Monster mendengarnya!', 5000);
+      }
+    },
+    onComplete: () => {
+      const wait = state.data.world.gameMode === 'story' ? 9000 : 0;
+      setTimeout(() => {
+        if (state.data.progress.gameOver) return;
+        Object.assign(state.data.progress, { gameOver: true, win: true, escaped: true });
+      }, wait);
+      if (state.data.world.gameMode === 'story') {
+        try { localStorage.setItem(`asap_story_${mission.def.id}`, '1'); } catch (e) { /* */ }
+      }
+    },
+  };
+}
+
+function tutorialCtx() {
+  const pp = state.data.player.position;
+  let md = Infinity;
+  for (const m of state.data.monsters || []) {
+    if (m.active === false) continue;
+    md = Math.min(md, Math.hypot(m.position.x - pp.x, m.position.z - pp.z));
+  }
+  const nearLoot = Object.values(state.data.pickups || {})
+    .some((pk) => !pk.taken && Math.hypot(pk.x - pp.x, pk.z - pp.z) < 8);
+  return {
+    pos: pp, monsterDist: md, nearLoot,
+    flash: !!(player?.flashlightOn || state.data.player?.flashlight),
+    dark: !!level || (state.data.world.timeOfDay ?? 0) >= 0.42,
+    touch: typeof inputMode === 'function' && inputMode() === 'touch',
+  };
+}
+
+function pickupReady(pk) {
+  if (pk.kind === 'generator') return false;
+  if (pk.kind === 'dropoff') return countOf(state.data.inventory, 'parcel') > 0;
+  return true;
+}
+
+
+function breakDoor(d, dx = 0, dz = 1, instant = false) {
+  if (!d || d.broken) return;
+  d.broken = true;
+  setDoor(d, true);
+  renderer?.breakDoor(d.id, dx, dz, instant);
+}
+
+function tickDoorBash() {
+  for (const mm of state.data.monsters) {
+    const b = mm.active !== false ? mm.breach : null;
+    if (b) renderer?.doorFx(b.id, b.style, b.ph);
   }
 }
 
@@ -1030,6 +1155,8 @@ function wireUI(canvas) {
     await leaveRoom();
     mode = 'solo';
     await setupLocalGame(false);
+    pickOne = room.meta?.mode === 'pickone' ? new PickOne({ room, state, controllers: () => monsters }) : null;
+    if (pickOne && room.isHost) pickOne.hostBegin();
     await audio.resume();
     document.getElementById('room-hud').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
@@ -1286,6 +1413,7 @@ function startLoop() {
     const used = tryUse();
     if (!used) tryVehicleInteract();
     tickDoorBash(dt);
+    pickOne?.tick(dt);
     if (cctv.on) {
       const pl = state.data.player;
       if (pl.health < cctv.hp - 0.5 || pl.isDowned) cctv.exit();
@@ -1316,6 +1444,7 @@ function startLoop() {
           const pl = state.data.player;
           if (pl.isDowned) {
             pl.alive = false;
+            state.data.progress.deaths += 1;
             state.data.progress.gameOver = true;
           } else {
             pl.health = Math.max(0, pl.health - dmg);
@@ -1384,7 +1513,8 @@ function startLoop() {
         m.active = r.active !== false;
         if (r.type && ROSTER[i] && r.type !== ROSTER[i]) console.warn('Versi game berbeda, muat ulang halaman');
         m.memory.suspicion = r.suspicion || 0;
-        m.attackCooldown = r.attackCooldown || 0;
+        m.attackCooldown = r.attackCooldown;
+        m.breach = r.door ? { id: r.door, ph: r.dph || 0, style: r.dst || 'smash' } : null;
       });
 
       // Apply host-written health to local player (non-host clients)
@@ -1601,7 +1731,7 @@ function startLoop() {
       state._hearingMask = hearingMask;
     } else if (room && room.gameStatus && room.gameStatus.weather) {
       state.data.world.weather = room.gameStatus.weather;
-      const wr = weatherCtrl.update(0, now, state.data.world, renderer, audio);
+      const wr = weatherCtrl.update(dt, now, state.data.world, renderer, audio, { follow: true });
       hearingMask = wr.hearingMask;
       state._hearingMask = hearingMask;
     }
@@ -1641,6 +1771,22 @@ function startLoop() {
 
 
     // --- Pickups (solo local / multi host-authoritative) ---
+    mission?.update(dt);
+    subs?.update(dt);
+    if (mission?.s && state?.data) {
+      const sig = `${mission.s.step}|${mission.s.count}|${Object.keys(mission.s.done || {}).join()}|${mission.s.complete}`;
+      if (sig !== mission._sig) {
+        mission._sig = sig;
+        state.data.mission = {
+          id: mission.def.id, v: mission.s.v, step: mission.s.step, count: mission.s.count,
+          done: { ...(mission.s.done || {}) }, complete: !!mission.s.complete, story: !!mission.s.story,
+        };
+        renderer?.updateMissionMarkers?.(mission.doneIds());
+      }
+      renderer?.setMissionMarkersVisible?.(mission.active);
+    }
+    tutorial?.update(dt, tutorialCtx());
+
     (function tickPickups() {
       const pickups = state.data.pickups || {};
       const pp = state.data.player.position;
@@ -1648,7 +1794,7 @@ function startLoop() {
       if (mode === 'solo' || room?.isHost) {
         let dirty = false;
         for (const pk of Object.values(pickups)) {
-          if (pk.taken || !near(pk, pp.x, pp.z, 1.8)) continue;
+          if (pk.taken || !pickupReady(pk) || !near(pk, pp.x, pp.z, 1.8)) continue;
           pk.taken = true;
           pk.takenBy = room?.uid || 'local';
           givePickupItem(pk);
@@ -1658,7 +1804,7 @@ function startLoop() {
           for (const [uid, c] of Object.entries(room.remoteClaims || {})) {
             const pk = pickups[c.pickupId];
             const rp = room.remotePlayers[uid];
-            if (!pk || pk.taken || !rp || !near(pk, rp.x, rp.z, 3)) continue;
+            if (!pk || pk.taken || pk.kind === 'generator' || !rp || !near(pk, rp.x, rp.z, 3)) continue;
             pk.taken = true;
             pk.takenBy = uid;
             dirty = true;
@@ -1668,7 +1814,7 @@ function startLoop() {
       } else if (room) {
         const t = performance.now();
         for (const [id, pk] of Object.entries(room.remotePickups || {})) {
-          if (!pk.taken && near(pk, pp.x, pp.z, 1.8) && t - (claimedPickups.get(id) || 0) > 2000) {
+          if (!pk.taken && pickupReady(pk) && near(pk, pp.x, pp.z, 1.8) && t - (claimedPickups.get(id) || 0) > 2000) {
             claimedPickups.set(id, t);
             room.claimPickup(id);
           }

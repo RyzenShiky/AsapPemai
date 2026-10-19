@@ -316,7 +316,7 @@ export class PlayerController {
     let speed = WALK;
     if (p.isCrouching) speed = CROUCH;
     else if (p.isRunning) speed = RUN;
-    speed *= p._weatherSpeed ?? 1;
+    speed *= (p._weatherSpeed ?? 1) * (p._speedMul ?? 1);
     if ((p.thirst ?? 100) <= 0) speed *= 0.85;
     try {
       const load = invWeight(this.state.data.inventory) / MAX_WEIGHT;

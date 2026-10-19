@@ -156,7 +156,7 @@ export function resolveCollisions(pos, radius, collidersOrSpatial) {
 }
 
 export function groundHeight(x, z) {
-  if (WORLD_FLAGS.endless) return 0;
+  if (WORLD_FLAGS.endless) return WORLD_FLAGS.floorFn ? WORLD_FLAGS.floorFn(x, z) : 0;
   const h = Math.sin(x * 0.12) * Math.cos(z * 0.1) * 0.4;
   const carve = 1.4 * Math.min(1, Math.max(0, 1 - distToRiver(x, z) / 8));
   const flat = Math.min(1, Math.max(0, distToRoad(x, z) / 6));

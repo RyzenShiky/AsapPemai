@@ -78,7 +78,7 @@ export function createInitialState() {
       food_a: { type: 'food', x: -30, z: 15, taken: false },
       fuel_a: { type: 'fuel', x: 45, z: 30, taken: false },
       board_a: { kind: 'board', x: 21, z: 22, taken: false },
-      gen_a: { kind: 'generator', x: 225, z: -110, taken: false },
+      gen_a: { kind: 'generator', x: 210, z: -110, taken: false },
       drop_a: { kind: 'dropoff', x: -24, z: 176, taken: false },
       ...containersFor(BUILDING_DEFS),
       med_a: { type: 'medkit', x: -10, z: 40, taken: false },
@@ -94,7 +94,8 @@ export function createInitialState() {
       timeUp: false,
       daysReached: 0,
     },
-    version: 4,
+    mission: null,
+    version: 5,
   };
 }
 
@@ -113,6 +114,7 @@ const MIGRATIONS = {
     },
     version: 4,
   }),
+  4: (d) => ({ ...d, mission: d.mission || null, version: 5 }),
 };
 
 export class GameState {

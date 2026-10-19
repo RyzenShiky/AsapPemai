@@ -1,11 +1,16 @@
 {
-  "orientation": "landscape",
   "name": "LONGWAY",
   "short_name": "LONGWAY",
-  "description": "LONGWAY — game horor 3D multiplayer di browser.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#07080a",
   "theme_color": "#07080a",
-  "icons": []
+  "icons": [
+    {
+      "src": "./assets/icons/android.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
 }

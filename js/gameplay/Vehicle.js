@@ -106,7 +106,7 @@ export class VehicleController {
     const useAx = ax && (Math.abs(ax.x) > dead || Math.abs(ax.y) > dead);
     const turn = useAx ? -f(ax.x) : (down(['KeyA', 'ArrowLeft']) ? 1 : 0) - (down(['KeyD', 'ArrowRight']) ? 1 : 0);
     const throttle = useAx ? -f(ax.y) : (down(['KeyW', 'ArrowUp']) ? 1 : 0) - (down(['KeyS', 'ArrowDown']) ? 1 : 0);
-    const maxSpd = this.type === 'motor' ? 9 : 14;
+    const maxSpd = this.type === 'motor' ? 13 : 18;
     const turnRate = this.type === 'motor' ? 1.8 : 1.0;
 
     this.targetSpeed = throttle * maxSpd;
@@ -123,7 +123,7 @@ export class VehicleController {
     this.position.x += dx;
     this.position.z += dz;
 
-    const radius = this.type === 'mobil' ? 1.3 : 0.55;
+    const radius = this.type === 'mobil' ? 1.1 : 0.55;
     resolveCollisions(this.position, radius, colliders);
     const c = clampToWorld(this.position.x, this.position.z);
     this.position.x = c.x;
@@ -132,11 +132,14 @@ export class VehicleController {
 
     const expectedX = prev.x + dx;
     const expectedZ = prev.z + dz;
+    this._crashCd = Math.max(0, (this._crashCd || 0) - dt);
+    const step = Math.hypot(dx, dz) || 1e-6;
     const pushed = Math.hypot(this.position.x - expectedX, this.position.z - expectedZ);
-    if (pushed > 0.05 && Math.abs(this.speed) > 4) {
-      const impact = Math.abs(this.speed);
-      this.crashShake = Math.min(1, impact / 10 + 0.4);
-      this.speed *= 0.25;
+    const head = Math.min(1, pushed / step); // 0 = menyamping, 1 = lurus
+    if (head > 0.35 && Math.abs(this.speed) > 5 && this._crashCd <= 0) {
+      this._crashCd = 0.6;
+      this.crashShake = Math.min(1, Math.abs(this.speed) / 10 + 0.4);
+      this.speed *= 1 - 0.6 * head;
       state.emitSound({
         position: { ...this.position },
         intensity: 1,
@@ -144,6 +147,8 @@ export class VehicleController {
         type: 'crash',
       });
       if (audio?.playCrashThud) audio.playCrashThud(pushed);
+    } else if (pushed > 0.01) {
+      this.speed *= 1 - Math.min(0.12, head * 0.3); // senggol: sedikit melambat
     }
 
     // Engine noise ~4×/s (not every frame) so suspicion stays fair

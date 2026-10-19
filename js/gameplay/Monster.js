@@ -6,10 +6,22 @@ import { canSee, openness } from '../ai/Vision.js';
 import { findPath } from '../ai/Pathfinding.js';
 import { inspectSpot } from './HideSpots.js';
 import { MONSTER_TYPES, ROSTER } from '../core/MonsterTypes.js';
+import { weatherVis } from '../core/Weather.js';
+import { DOORS, isInsideBuilding, setDoor } from '../core/Buildings.js';
 
 function distXZ(a, b) {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
+
+const BREACH = {
+  stab:  [0.9, 0.8, 0.6],
+  smash: [1.2, 0, 0.5],
+  open:  [0.8, 0.7, 0],
+  phase: [1.4, 0, 0],
+};
+const DOOR_REACH = 2.4;
+const DOOR_STANDOFF = 1.2;
+const STATE_SPEED = { INVESTIGATE: 1.3, SEARCH: 1, CHASE: 2, LOST_TARGET: 1.6, AMBUSH: 1.8 };
 
 const PATROL_ANCHORS = [
   { x: -150, z: -150 },
@@ -121,30 +133,50 @@ export class MonsterController {
           : 1;
     const weatherMulClamped = Math.max(0.6, weatherMul) * (this.state._hearingMask ?? 1) * (this.cfg.sense?.hear ?? this.cfg.hearMul ?? 1);
 
+    // Build target list once
+    const me = this.state.data.player;
+    const targets = [];
+    if (me.alive !== false)
+      targets.push({ uid: 'me', pos: me.position, hiding: !!me.isHiding, flash: !!me.flashlight || !!me.lighter });
+    if (this.room?.isHost && this.room.remotePlayers) {
+      for (const [uid, rp] of Object.entries(this.room.remotePlayers)) {
+        if (uid === this.room.uid || rp.alive === false) continue;
+        targets.push({ uid, pos: { x: rp.x, y: rp.y ?? 1.7, z: rp.z }, hiding: !!rp.hiding, flash: !!rp.fl });
+      }
+    }
     const tgt = this._pickTarget(m);
     const ppos = tgt.pos;
     const distP = Math.hypot(m.position.x - ppos.x, m.position.z - ppos.z);
 
-    // Vision check ~5×/sec
+    // Vision ~5×/s: check ALL players
     this._visionAcc += dt;
     if (this._visionAcc >= 0.2) {
       this._visionAcc = 0;
-      const light =
-        this.state.data.world.weather === 'fog'
-          ? 0.45
-          : this.state.data.world.weather === 'rain'
-            ? 0.8
-            : 1;
+      const light = typeof weatherVis === 'function'
+        ? weatherVis(this.state.data.world.weather)
+        : (this.state.data.world.weather === 'fog' ? 0.45 : this.state.data.world.weather === 'rain' ? 0.8 : 1);
       const sense = this.cfg.sense || {};
-      let range = tgt.hiding ? 7 : (sense.sightRange ?? 28);
-      if (tgt.flash) range *= 1.25;
       const fov = sense.fov ?? 1.9;
       const lampSites = this.state._lampSites || null;
-      m.memory.canSeePlayer = canSee(m, ppos, this.colliders, { light, range, fov, lampSites });
-      if (m.memory.canSeePlayer) {
-        m.memory.lastSeenPosition = { x: ppos.x, y: ppos.y, z: ppos.z };
+      let seen = null, seenD = Infinity;
+      for (const t of targets) {
+        let range = t.hiding ? 7 : (sense.sightRange ?? 28);
+        if (t.flash) range *= 1.25;
+        if (!canSee(m, t.pos, this.colliders, { light, range, fov, lampSites })) continue;
+        const d = Math.hypot(m.position.x - t.pos.x, m.position.z - t.pos.z);
+        if (d < seenD) { seen = t; seenD = d; }
+      }
+      this._seenUid = seen ? seen.uid : null;
+      m.memory.canSeePlayer = !!seen;
+      if (seen) {
+        m.memory.lastSeenPosition = { x: seen.pos.x, y: seen.pos.y ?? 1.7, z: seen.pos.z };
         m.memory.lastSeenTime = now;
       }
+    }
+    // FIX: seeing player raises suspicion (was sound-only)
+    if (m.memory.canSeePlayer) {
+      const near = 1 - Math.min(1, distP / (this.cfg.sense?.sightRange ?? 28));
+      this.perception.suspicion.add((tgt.hiding ? 10 : 35 + 65 * near) * dt);
     }
 
     this.perception.update(m, events, now, dt, weatherMulClamped, {
@@ -165,7 +197,22 @@ export class MonsterController {
       this._prevAi = m.aiState;
     }
 
-    switch (m.aiState) {
+    if (m.possessed) {
+      if (this._br) this._breachTick(m, dt);
+      return;
+    }
+
+    if (this._br) {
+      this._breachTick(m, dt);
+    } else {
+      const goal = this._goal(m, tgt);
+      const door = m.aiState === 'STUNNED' ? null : this._doorFor(m, goal);
+      if (door) this._breachStart(m, door);
+      else this._aiMove(m, tgt, dt, base, frenzy);
+    }
+
+    // legacy switch disabled when _aiMove used
+    if (false) switch (m.aiState) {
       case 'STUNNED':
         break;
       case 'PATROL':
@@ -207,10 +254,11 @@ export class MonsterController {
     // Stuck watchdog
     const moved = Math.hypot(m.position.x - prevX, m.position.z - prevZ);
     const expected = base * dt * 0.3;
-    if (this.target && moved < expected) this._stuck += dt;
+    if ((this.target || m.aiState === 'PATROL') && moved < expected) this._stuck += dt;
     else this._stuck = 0;
     if (this._stuck > 2) {
       this.target = null;
+      this._pp = null;
       this.anchorIdx = (this.anchorIdx + 1) % this.patrolAnchors.length;
       this._stuck = 0;
     }
@@ -237,6 +285,104 @@ export class MonsterController {
         else if (maxS >= 40) ind.classList.add('mid');
         else if (maxS >= 15) ind.classList.add('low');
       }
+    }
+  }
+
+
+  _goal(m, tgt) {
+    const mem = m.memory;
+    switch (m.aiState) {
+      case 'INVESTIGATE':
+        return mem.lastHeardPosition || null;
+      case 'SEARCH':
+        return this.target || null;
+      case 'CHASE':
+        return mem.canSeePlayer ? tgt.pos : (mem.lastSeenPosition ?? mem.lastHeardPosition ?? null);
+      case 'LOST_TARGET':
+        return mem.lastSeenPosition ?? mem.lastHeardPosition ?? null;
+      case 'AMBUSH':
+        return distXZ(m.position, tgt.pos) < 14 ? tgt.pos : null;
+      default:
+        return null;
+    }
+  }
+
+  _blockingDoor(m, goal) {
+    const from = isInsideBuilding(m.position.x, m.position.z);
+    const to = isInsideBuilding(goal.x, goal.z);
+    if (from === to) return null;
+    const b = from || to;
+    const d = DOORS.find((x) => x.id === b.id);
+    return d && !d.open && !d.broken ? d : null;
+  }
+
+  _doorFor(m, goal) {
+    if (!goal) return null;
+    const d = this._blockingDoor(m, goal);
+    return d && distXZ(m.position, d) < DOOR_REACH ? d : null;
+  }
+
+  _doorApproach(m, d) {
+    const k = Math.min(1, DOOR_STANDOFF / (distXZ(m.position, d) || 1));
+    return { x: d.x + (m.position.x - d.x) * k, z: d.z + (m.position.z - d.z) * k };
+  }
+
+  _aiMove(m, tgt, dt, base, frenzy) {
+    const s = m.aiState;
+    if (s === 'STUNNED') return;
+    if (s === 'PATROL' || s === 'IDLE') {
+      this.widePatrol(m, dt, base * 0.8 * Math.min(1.2, frenzy));
+      return;
+    }
+    if (s === 'SEARCH' && (!this.target || distXZ(m.position, this.target) < 1.5)) {
+      this.target = pickSearchTarget(m.memory, this.cfg.search, this._searchStep++);
+    }
+    const goal = this._goal(m, tgt);
+    if (!goal) return;
+    const door = this._blockingDoor(m, goal);
+    this.moveToward(m, door ? this._doorApproach(m, door) : goal, dt, base * (STATE_SPEED[s] ?? 1) * frenzy);
+  }
+
+  _breachStart(m, d) {
+    const style = BREACH[this.cfg.breach] ? this.cfg.breach : 'smash';
+    const dx = d.x - m.position.x;
+    const dz = d.z - m.position.z;
+    const len = Math.hypot(dx, dz) || 1;
+    this._br = { d, style, ph: 0, t: 0, dx: dx / len, dz: dz / len };
+    m.breach = { id: d.id, ph: 0, style };
+    m.rotation.yaw = Math.atan2(-dx, -dz);
+  }
+
+  _breachTick(m, dt) {
+    const br = this._br;
+    if (!br) return;
+    if (m.aiState === 'STUNNED' || m._teleported || br.d.open || br.d.broken) {
+      this._breachEnd(m, false);
+      return;
+    }
+    this._stuck = 0;
+    const times = BREACH[br.style];
+    br.t += dt;
+    while (br.ph < times.length && br.t >= times[br.ph]) br.t -= times[br.ph++];
+    if (br.ph >= times.length) this._breachEnd(m, true);
+    else m.breach.ph = br.ph;
+  }
+
+  _breachEnd(m, done) {
+    const { d, style, dx, dz } = this._br;
+    this._br = null;
+    m.breach = null;
+    this._path = null;
+    if (!done) return;
+    if (style === 'phase') {
+      const alongZ = d.col && (d.col.maxX - d.col.minX > d.col.maxZ - d.col.minZ);
+      m.position.x = alongZ ? d.x : d.x + (dx >= 0 ? 1.6 : -1.6);
+      m.position.z = alongZ ? d.z + (dz >= 0 ? 1.6 : -1.6) : d.z;
+    } else if (typeof this.state._doorFx === 'function') {
+      this.state._doorFx(d, style === 'open' ? 'open' : 'break', dx, dz);
+    } else {
+      if (style !== 'open') d.broken = true;
+      setDoor(d, true);
     }
   }
 
@@ -366,20 +512,51 @@ export class MonsterController {
   }
 
   widePatrol(m, dt, speed) {
+    if (m._teleported) {
+      this._pp = null;
+      this.target = null;
+      this._path = null;
+      m._teleported = false;
+    }
     const lv = this.state._level;
     if (lv && lv.patrol) {
       this._ppT = (this._ppT || 0) + dt;
-      if (!this._pp || this._ppT > 12 || distXZ(m.position, this._pp) < 1.5) {
-        this._pp = lv.patrol(Math.random() < 0.35 ? this.state.data.player.position : m.position);
+      if (!this._pp || this._ppT > 10 || distXZ(m.position, this._pp) < 1.5) {
+        this._pp = lv.patrol(Math.random() < 0.65 ? this.state.data.player.position : m.position);
         this._ppT = 0;
       }
       this.moveToward(m, this._pp, dt, speed);
       return;
     }
-    const anchor = this.patrolAnchors[this.anchorIdx];
-    if (distXZ(m.position, anchor) < 4) {
-      this.anchorIdx = (this.anchorIdx + 1) % this.patrolAnchors.length;
+    this._ppT = (this._ppT || 0) + dt;
+    if (!this._pp || this._ppT > 25 || distXZ(m.position, this._pp) < 5) {
+      this._pp = this._randomPatrolPoint(m);
+      this._ppT = 0;
     }
-    this.moveToward(m, this.patrolAnchors[this.anchorIdx], dt, speed);
+    this.moveToward(m, this._pp, dt, speed);
+  }
+
+
+  _randomPatrolPoint(m) {
+    const H = WORLD.half - 20;
+    const seen = (this._visit ||= new Map());
+    let best = null, bestT = Infinity;
+    for (let k = 0; k < 4; k++) {
+      const x = (Math.random() * 2 - 1) * H, z = (Math.random() * 2 - 1) * H;
+      const key = (((x + H) / 72) | 0) + ',' + (((z + H) / 72) | 0);
+      const test = { x, z };
+      resolveCollisions(test, 1.2, this.colliders);
+      if (Math.hypot(test.x - x, test.z - z) > 0.05) continue;
+      const t = seen.get(key) ?? 0;
+      if (t < bestT) { bestT = t; best = { x, z, key }; }
+    }
+    if (!best) {
+      return {
+        x: m.position.x + (Math.random() - 0.5) * 80,
+        z: m.position.z + (Math.random() - 0.5) * 80,
+      };
+    }
+    seen.set(best.key, performance.now());
+    return best;
   }
 }

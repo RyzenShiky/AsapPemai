@@ -81,7 +81,7 @@ export function getStorageRef() {
 
 export async function uploadBillboardMedia(file, roomCode) {
   if (file.size > 8 * 1024 * 1024) throw new Error('File terlalu besar (maks 8 MB)');
-  const ok = /^(image\/|video\/mp4|audio\/mpeg)/.test(file.type || '');
+  const ok = /^(image\/|video\/mp4)/.test(file.type || '');
   if (!ok) throw new Error('Tipe file tidak diizinkan');
   const storage = getStorageRef();
   const safe = (file.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -127,6 +127,8 @@ export class MultiplayerRoom {
     this.remoteClaims = {};
     this.remoteBillboard = null;
     this.gameStatus = { gameOver: false, win: false };
+    this.remoteMission = null;
+    this.remoteMissionActs = {};
     this.meta = { hostUid: null, started: false };
     this.onUpdate = null;
     this.skew = 0;
@@ -238,6 +240,11 @@ export class MultiplayerRoom {
       this.gameStatus = v.game || { gameOver: false, win: false };
       this.remoteVehicles = v.vehicles || {};
       this.remotePickups = v.pickups || {};
+      this.remoteMission = v.mission || null;
+      this.remoteMissionActs = v.missionActs || {};
+      this.remotePick = v.pick || null;
+      this.remotePickChoice = v.pickChoice || {};
+      this.remotePickAct = v.pickAct || {};
       this.remoteClaims = v.pickupClaims || {};
       this.remoteBillboard = v.billboard || null;
       this.meta = v.meta || { hostUid: null, started: false };
@@ -290,6 +297,51 @@ export class MultiplayerRoom {
         intensity: e.intensity, radius: e.radius, type: e.type,
       })),
     });
+  }
+
+  writeDoorBroken(id) {
+    if (!this.code || !id) return Promise.resolve();
+    return set(ref(this.db, `rooms/${this.code}/doorsBroken/${id}`), true);
+  }
+
+  listenDoorsBroken(cb) {
+    if (!this.code || this._brokenListening) return;
+    this._brokenListening = true;
+    onValue(ref(this.db, `rooms/${this.code}/doorsBroken`), (snap) => {
+      const v = snap.val() || {};
+      for (const id of Object.keys(v)) {
+        try { cb?.(id); } catch (e) { /* */ }
+      }
+    });
+  }
+
+  setMode(mode) {
+    if (!this.isHost) return Promise.resolve();
+    this.meta.mode = mode;
+    return update(ref(this.db, `rooms/${this.code}/meta`), { mode });
+  }
+
+  writePick(p) {
+    if (!this.isHost) return Promise.resolve();
+    return set(ref(this.db, `rooms/${this.code}/pick`), { ...p, t: Date.now() });
+  }
+
+  clearPick() {
+    if (!this.isHost) return Promise.resolve();
+    return Promise.all(
+      ['pick', 'pickChoice', 'pickAct'].map((k) => set(ref(this.db, `rooms/${this.code}/${k}`), null))
+    );
+  }
+
+  writePickChoice(type) {
+    return set(ref(this.db, `rooms/${this.code}/pickChoice/${this.uid}`), {
+      type: String(type).slice(0, 16), t: Date.now(),
+    });
+  }
+
+  writePickAct(k, id = null) {
+    this._actN = (this._actN || 0) + 1;
+    return set(ref(this.db, `rooms/${this.code}/pickAct/${this.uid}`), { k, id, n: this._actN, t: Date.now() });
   }
 
   writeDoor(id, open) {
@@ -388,6 +440,9 @@ export class MultiplayerRoom {
         attackCooldown: m.attackCooldown || 0,
         active: m.active !== false,
         type: ROSTER[i] || 'shadow',
+        door: m.breach?.id ?? null,
+        dph: m.breach?.ph ?? 0,
+        dst: m.breach?.style ?? null,
       };
     });
     return set(ref(this.db, `rooms/${this.code}/monster`), payload);
@@ -477,6 +532,17 @@ export class MultiplayerRoom {
   writePickups(pickups) {
     if (!this.isHost) return Promise.resolve();
     return set(ref(this.db, `rooms/${this.code}/pickups`), pickups || {});
+  }
+
+  writeMission(state) {
+    if (!this.isHost) return Promise.resolve();
+    return set(ref(this.db, `rooms/${this.code}/mission`), state);
+  }
+
+  sendMissionAct(act) {
+    return set(ref(this.db, `rooms/${this.code}/missionActs/${this.uid}`), {
+      n: act.n, target: act.target, t: Date.now(),
+    });
   }
 
   claimPickup(pickupId) {
