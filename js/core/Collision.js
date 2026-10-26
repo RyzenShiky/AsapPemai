@@ -1,5 +1,5 @@
-import { WORLD, tileSeed, onRoad, distToRoad, distToRiver, WORLD_FLAGS, LANDMARKS } from './WorldConfig.js';
-import { allBuildingColliders, nearBuilding } from './Buildings.js';
+import { WORLD, tileSeed, onRoad, distToRoad, distToRiver, WORLD_FLAGS, LANDMARKS, BIOME, PYRAMID, onPyramid, pyramidHeight } from './WorldConfig.js';
+import { allBuildingColliders, nearBuilding, BUILDING_DEFS } from './Buildings.js';
 
 const CELL = 20;
 
@@ -21,7 +21,7 @@ export function buildColliders() {
         const x = ox + (sx - 0.5) * (ts - 2);
         const z = oz + (sz - 0.5) * (ts - 2);
         if (Math.hypot(x, z) < 8) continue;
-        if (nearBuilding(x, z, 9) || onRoad(x, z, 5)) continue;
+        if (nearBuilding(x, z, 9) || onRoad(x, z, 5) || onPyramid(x, z, 8)) continue;
         colliders.push({
           x, z, r: 0.35 * scale, type: 'tree',
           scale, rot: tileSeed(tx, tz, i * 5) * Math.PI * 2,
@@ -34,7 +34,7 @@ export function buildColliders() {
         const x = ox + (sx - 0.5) * (ts - 3);
         const z = oz + (sz - 0.5) * (ts - 3);
         if (Math.hypot(x, z) < 6) continue;
-        if (nearBuilding(x, z, 7) || onRoad(x, z, 4)) continue;
+        if (nearBuilding(x, z, 7) || onRoad(x, z, 4) || onPyramid(x, z, 8)) continue;
         const sc = 0.6 + tileSeed(tx, tz, 300 + i) * 1.4;
         colliders.push({ x, z, r: 0.7 * sc, type: 'rock', scale: sc });
       }
@@ -155,8 +155,20 @@ export function resolveCollisions(pos, radius, collidersOrSpatial) {
   }
 }
 
-export function groundHeight(x, z) {
+export function groundHeight(x, z, terrainOnly = false) {
   if (WORLD_FLAGS.endless) return WORLD_FLAGS.floorFn ? WORLD_FLAGS.floorFn(x, z) : 0;
+  if (BIOME === 'desert') {
+    const [ax, az] = PYRAMID.tiers[0];
+    const out = Math.max(Math.abs(x - PYRAMID.x) - ax, Math.abs(z - PYRAMID.z) - az);
+    const away = Math.min(1, Math.max(0, out / 25));
+    const flat = Math.min(1, Math.max(0, distToRoad(x, z) / 6));
+    let bd = Infinity;
+    for (const b of BUILDING_DEFS) bd = Math.min(bd, Math.max(Math.abs(x - b.x) - b.w / 2, Math.abs(z - b.z) - b.d / 2));
+    const flatB = Math.min(1, Math.max(0, (bd - 14) / 22));
+    const dune = (Math.sin(x * 0.025 + z * 0.012) * 2.2 + Math.sin(z * 0.04 - x * 0.015) * 1.4
+      + Math.sin(x * 0.11) * Math.cos(z * 0.09) * 0.3) * flat * away * flatB;
+    return dune + (terrainOnly ? 0 : pyramidHeight(x, z));
+  }
   const h = Math.sin(x * 0.12) * Math.cos(z * 0.1) * 0.4;
   const carve = 1.4 * Math.min(1, Math.max(0, 1 - distToRiver(x, z) / 8));
   const flat = Math.min(1, Math.max(0, distToRoad(x, z) / 6));

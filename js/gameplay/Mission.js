@@ -1,6 +1,7 @@
 import { countOf } from './Items.js';
 import { binds, keyLabel } from '../input/Bindings.js';
 import { cellPath } from '../core/Level.js';
+import { LANDMARKS } from '../core/WorldConfig.js';
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -63,6 +64,113 @@ export const MISSIONS = {
         title: 'Temukan pintu keluar', hint: 'Listrik kembali dan sesuatu terbangun. Semua harus sampai di pintu.' },
     ],
   },
+
+  desert: {
+    id: 'desert_djoser', version: 1, title: 'Senja di Saqqara', compass: true,
+    anchors: {
+      p1: { x: 105, z: -470, r: 3.5, label: 'Halaman Heb-Sed' },
+      p2: { x: 0, z: -548, r: 3.5, label: 'Halaman utara' },
+      p3: { x: 0, z: -470, r: 5, label: 'Puncak piramida' },
+      exit: { x: 0, z: 8, r: 14, label: 'Titik evakuasi' },
+    },
+    story: {
+      intro: [
+        'Helikopter survei kalian turun darurat di gurun saat senja. Radio mati, hanya angin.',
+        'Di utara, siluet raksasa bertingkat berdiri di depan matahari: piramida berundak yang seharusnya sudah runtuh seribu tahun lalu.',
+        'Suar di tiga titik kompleks itu bisa memanggil bantuan. Tapi sesuatu di dalam pagar sudah menunggu.',
+      ],
+      start: { beacons: ['Masuk lewat gerbang di sudut tenggara pagar. Nyalakan tiga suar: halaman Heb-Sed, halaman utara, dan puncak piramida.'],
+        exit: ['Tiga suar menyala. Kembali ke kamp sebelum apa pun di dalam pagar mengejar cahaya.'] },
+      logs: {
+        p1: ['Suar 1: kapel-kapel kosong berjajar, dan tidak satu pun pintunya benar-benar terbuka.'],
+        p2: ['Suar 2: di depan serdab, dua lubang kecil menatap lurus ke arah piramida.'],
+        p3: ['Suar 3: dari puncak, seluruh gurun terlihat. Dan ada sesuatu yang bergerak di bawah sana.'],
+      },
+      ending: ['Cahaya terakhir padam di puncak. Di kejauhan, rotor helikopter penyelamat terdengar.',
+        'Di pasir dekat api unggun ada jejak kaki. Bukan milik kalian, dan arahnya menuju kamp.'],
+    },
+    steps: [
+      { id: 'beacons', kind: 'activate', anchors: ['p1', 'p2', 'p3'], prompt: 'Nyalakan suar',
+        title: 'Nyalakan 3 suar di kompleks piramida', hint: 'Gerbang ada di sudut tenggara pagar. Satu suar ada di puncak piramida.' },
+      { id: 'exit', kind: 'gather', anchor: 'exit', surge: true,
+        title: 'Kembali ke kamp evakuasi', hint: 'Suar memancing monster. Semua harus sampai di kamp.' },
+    ],
+  },
+
+  pool: {
+    id: 'poolrooms_still_water', version: 1, title: 'Air yang Tidak Surut', compass: false,
+    anchors: {
+      v1: cc(6, 4), v2: cc(-9, 10), v3: cc(12, -8),
+      relay: cc(0, -14, 3), exit: cc(-16, -6, 3),
+    },
+    story: {
+      intro: ['Pintu dashboard membuka ke ubin putih dan air setinggi lutut.',
+              'Catatan Rani: "Kolam ini mengalir ke bawah. Tutup tiga katup sebelum permukaannya naik."'],
+      start: { valves: ['Putar tiga katup. Jangan berisik, air memantulkan suara.'],
+               relay:  ['Pompa butuh daya. Pasang dua baterai di panel relay.'],
+               exit:   ['Air mulai naik. Cari tangga keluar bersama-sama.'] },
+      ending: ['Permukaan air membeku di anak tangga terakhir. Di atasnya, pasir.',
+               'Episode 4 terbuka: Suar Kedua.'],
+    },
+    steps: [
+      { id: 'valves', kind: 'activate', anchors: ['v1','v2','v3'], prompt: 'Putar katup',
+        title: 'Tutup 3 katup', hint: 'Katup ada di tiga sudut kolam.' },
+      { id: 'relay', kind: 'deposit', anchor: 'relay', item: 'battery', required: 2, prompt: 'Pasang baterai',
+        title: 'Hidupkan relay pompa', find: 'Cari baterai di sudut ruangan.', hint: 'Bawa baterai ke panel relay.' },
+      { id: 'exit', kind: 'gather', anchor: 'exit', surge: true,
+        title: 'Naik ke tangga keluar', hint: 'Semua harus sampai.' },
+    ],
+  },
+
+  desert2: {
+    id: 'desert_second_beacon', version: 1, title: 'Suar Kedua', compass: true,
+    anchors: {
+      p1: { x: 105, z: -470, r: 3.5, label: 'Halaman Heb-Sed' },
+      p2: { x: 0, z: -548, r: 3.5, label: 'Halaman utara' },
+      p3: { x: 0, z: -470, r: 5, label: 'Puncak piramida' },
+      exit: { x: 0, z: 8, r: 14, label: 'Titik evakuasi' },
+    },
+    story: {
+      intro: ['Pasir menggantikan air. Jejak kaki di kamp lama menuju kompleks Djoser.'],
+      start: { power: ['Isi dua baterai ke suar halaman utara.'],
+               beacons: ['Nyalakan suar di Heb-Sed dan puncak piramida.'],
+               exit: ['Semua suar menyala. Kembali ke kamp.'] },
+      ending: ['Di cahaya terakhir, jejak kaki itu berhenti di depan kalian. Episode 5: Besok Pagi.'],
+    },
+    steps: [
+      { id: 'power', kind: 'deposit', anchor: 'p2', item: 'battery', required: 2, prompt: 'Isi baterai',
+        title: 'Hidupkan suar utara', find: 'Cari baterai di sepanjang jalur.', hint: 'Bawa ke halaman utara.' },
+      { id: 'beacons', kind: 'activate', anchors: ['p1','p3'], prompt: 'Nyalakan suar',
+        title: 'Nyalakan 2 suar', hint: 'Heb-Sed dan puncak piramida.' },
+      { id: 'exit', kind: 'gather', anchor: 'exit', surge: true,
+        title: 'Kembali ke kamp', hint: 'Suar memancing monster.' },
+    ],
+  },
+
+  finale: {
+    id: 'westwood_tomorrow', version: 1, title: 'Besok Pagi', compass: true,
+    anchors: {
+      gen:  { x: 210, z: -110, r: 6, label: 'Generator' },
+      seal: { x: LANDMARKS.summoningCircle.x, z: LANDMARKS.summoningCircle.z, r: 7, label: 'Lingkaran pemanggil' },
+      extract: { x: 0, z: 8, r: 12, label: 'Titik evakuasi' },
+    },
+    story: {
+      intro: ['Westwood, fajar yang sama seperti catatan Rani. Semua monster berkumpul menunggu.'],
+      start: { power: ['Isi tiga bensin ke generator untuk terakhir kalinya.'],
+               seal: ['Padamkan lingkaran pemanggil di barat.'],
+               extract: ['Lari ke jalan. Jangan menoleh.'] },
+      ending: ['Matahari naik. Radio hening. Kali ini tidak ada suara Rani, dan itu artinya dia keluar.'],
+    },
+    steps: [
+      { id: 'power', kind: 'deposit', anchor: 'gen', item: 'fuel', required: 3, prompt: 'Isi bensin',
+        title: 'Nyalakan generator', find: 'Cari bensin di rumah dan depot.', hint: 'Sisi timur peta.' },
+      { id: 'seal', kind: 'activate', anchors: ['seal'], prompt: 'Padamkan lingkaran',
+        title: 'Segel lingkaran pemanggil', hint: 'Sanity turun di dekatnya, bawa baterai dan makanan.' },
+      { id: 'extract', kind: 'gather', anchor: 'extract', surge: true,
+        title: 'Kembali ke jalan', hint: 'Semua harus sampai.' },
+    ],
+  },
+
 };
 
 export function validateAnchors(def, from = { x: 5, z: 8 }) {

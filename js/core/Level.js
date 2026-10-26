@@ -565,6 +565,7 @@ const pSplash = (audio, A, depth) => {
 };
 
 registerLevel('backrooms37', {
+  mission: 'pool',
   fog: 0xbfe6e8, fogDensity: 0.024, humHz: 50, drain: 0.35, path: path37,
 
   setup(m) {
@@ -695,16 +696,359 @@ registerLevel('backrooms37', {
   },
 });
 
+
+/* ====================== DESERT — KOMPLEKS PIRAMIDA DJOSER ====================== */
+const D_CH = 64, D_SEG = 24, D_FOG = 0xb98660;
+const DJ = { cx: 0, cz: -500, hx: 138.8, hz: 272.45, wt: 3, wh: 10.5, gate: [120, 129], col: 54 };
+const PYR = {
+  x: 0, z: -470, batter: 0.3,
+  tiers: [[60.5, 54.5, 11.6], [53.5, 47.9, 11.2], [46.5, 41.3, 10.7], [39.5, 34.7, 10.2], [32.5, 28.1, 9.7], [25.5, 21.5, 9.1]],
+};
+const D_SUN = new THREE.Vector3(0.25, 0.2, -0.95).normalize();
+const clamp01 = (t) => Math.min(1, Math.max(0, t));
+
+const vn = (x, z) => {
+  const i = Math.floor(x), j = Math.floor(z), u = smooth(x - i), v = smooth(z - j);
+  return (h(i, j, 91) * (1 - u) + h(i + 1, j, 91) * u) * (1 - v) + (h(i, j + 1, 91) * (1 - u) + h(i + 1, j + 1, 91) * u) * v;
+};
+const dunes = (x, z) => {
+  const u = x * 0.8 + z * 0.6, w = -x * 0.6 + z * 0.8;
+  const big = (vn(u / 70, w / 160) - 0.5) * 2;
+  const ridge = 1 - Math.abs(vn(u / 34 + 9, w / 90) * 2 - 1);
+  return big * 4.5 + ridge * ridge * 3.2 + (vn(u / 17 + 3, w / 40) - 0.5) * 1.4;
+};
+const pyrOut = (x, z) => Math.max(Math.abs(x - PYR.x) - PYR.tiers[0][0], Math.abs(z - PYR.z) - PYR.tiers[0][1]);
+const flatMask = (x, z) => {
+  const c = clamp01((Math.hypot(x, z - 8) - 30) / 45);
+  const out = Math.max(Math.abs(x - DJ.cx) - DJ.hx, Math.abs(z - DJ.cz) - DJ.hz);
+  return smooth(c) * smooth(clamp01(out / 45));
+};
+const rubble = (x, z) => {
+  const out = pyrOut(x, z);
+  if (out > 14 || out < -4) return 0;
+  return 4.5 * (0.65 + 0.7 * vn(x / 6, z / 6)) * (1 - (out + 4) / 18) ** 2;
+};
+const pyrH = (x, z) => {
+  const dx = Math.abs(x - PYR.x), dz = Math.abs(z - PYR.z);
+  let y0 = 0, best = 0;
+  for (const [ax, az, th] of PYR.tiers) {
+    const b = th * PYR.batter;
+    if (dx <= ax && dz <= az) best = Math.max(best, y0 + th * Math.min(1, (ax - dx) / b, (az - dz) / b));
+    y0 += th;
+  }
+  return best;
+};
+const terrainH = (x, z) => dunes(x, z) * flatMask(x, z) + rubble(x, z);
+const floorH = (x, z) => Math.max(terrainH(x, z), pyrH(x, z));
+
+const inCx = (x, z, m = 0) => x > DJ.cx - DJ.hx - m && x < DJ.cx + DJ.hx + m && z > DJ.cz - DJ.hz - m && z < DJ.cz + DJ.hz + m;
+const dWx0 = DJ.cx - DJ.hx, dWx1 = DJ.cx + DJ.hx, dWz0 = DJ.cz - DJ.hz, dWz1 = DJ.cz + DJ.hz;
+const D_SLABS = [
+  [dWx0 - DJ.wt, dWx1 + DJ.wt, dWz0 - DJ.wt, dWz0],
+  [dWx0 - DJ.wt, dWx0, dWz0, dWz1],
+  [dWx1, dWx1 + DJ.wt, dWz0, dWz1],
+  [dWx0 - DJ.wt, DJ.gate[0], dWz1, dWz1 + DJ.wt],
+  [DJ.gate[1], dWx1 + DJ.wt, dWz1, dWz1 + DJ.wt],
+];
+const D_COLN_WALLS = [
+  [DJ.gate[0] - 3, DJ.gate[0], dWz1 - DJ.col, dWz1], [DJ.gate[1], DJ.gate[1] + 3, dWz1 - DJ.col, dWz1],
+];
+const D_COLS = [];
+for (let k = 0; k < 10; k++) for (const x of [DJ.gate[0] + 0.9, DJ.gate[1] - 0.9]) D_COLS.push({ x, z: dWz1 - 4.5 - k * 5.4 });
+const D_SHRINES = [];
+for (let k = 0; k < 11; k++) for (const x of [92, 118]) D_SHRINES.push({ x, z: -540 + k * 14 });
+const D_SERDAB = { x: 6, z: -534 };
+const D_TENTS = [{ x: -9, z: 15 }, { x: 8, z: 17 }, { x: 11, z: 3 }, { x: -10, z: -3 }];
+const aabb = (a, b, c, d) => ({ type: 'wall', minX: a, maxX: b, minZ: c, maxZ: d });
+const D_FIXED = [
+  ...D_SLABS.map((s) => aabb(...s)), ...D_COLN_WALLS.map((s) => aabb(...s)),
+  ...D_COLS.map((c) => ({ type: 'rock', x: c.x, z: c.z, r: 0.65 })),
+  ...D_SHRINES.map((s) => aabb(s.x - 2.2, s.x + 2.2, s.z - 2.2, s.z + 2.2)),
+  aabb(D_SERDAB.x - 1.6, D_SERDAB.x + 1.6, D_SERDAB.z - 1.6, D_SERDAB.z + 1.6),
+  ...D_TENTS.map((t) => ({ type: 'rock', x: t.x, z: t.z, r: 2 })),
+];
+const D_BLOCK = (x, z, m = 1) => D_FIXED.some((c) => (c.type === 'wall'
+  ? x > c.minX - m && x < c.maxX + m && z > c.minZ - m && z < c.maxZ + m
+  : Math.hypot(x - c.x, z - c.z) < c.r + m));
+const dSpawn = (pos, min = 25, max = 70) => {
+  for (let k = 0; k < 10; k++) {
+    const a = Math.random() * 6.283, r = min + Math.random() * (max - min);
+    const x = pos.x + Math.cos(a) * r, z = pos.z + Math.sin(a) * r;
+    if (!D_BLOCK(x, z, 2)) return { x, y: 0, z };
+  }
+  return { x: pos.x + min, y: 0, z: pos.z };
+};
+const GATE_OUT = { x: (DJ.gate[0] + DJ.gate[1]) / 2, z: dWz1 + 10 };
+const GATE_IN = { x: GATE_OUT.x, z: dWz1 - DJ.col - 8 };
+const dPath = (s, g) => {
+  const a = inCx(s.x, s.z), b = inCx(g.x, g.z), goal = { x: g.x, z: g.z };
+  if (a === b) return [goal];
+  return b ? [GATE_OUT, GATE_IN, goal] : [GATE_IN, GATE_OUT, goal];
+};
+
+const drawSand = (g, s) => { g.fillStyle = '#e6dfd0'; g.fillRect(0, 0, s, s); speckle(g, s, 9000, 0.09, 2); };
+const drawFacade = (g, s) => {
+  g.fillStyle = '#d8cba8'; g.fillRect(0, 0, s, s);
+  speckle(g, s, 6000, 0.07, 2);
+  g.strokeStyle = 'rgba(110,90,55,.25)'; g.lineWidth = 1;
+  for (let y = 0; y < s; y += 12) { g.beginPath(); g.moveTo(0, y); g.lineTo(s, y); g.stroke(); }
+  for (let k = 0; k < 2; k++) {
+    const x = k * 256 + 40, w = 176;
+    g.fillStyle = 'rgba(70,52,28,.38)'; g.fillRect(x, 70, w, 400);
+    g.fillStyle = 'rgba(40,28,12,.5)'; g.fillRect(x, 70, 14, 400); g.fillRect(x, 70, w, 12);
+    g.fillStyle = 'rgba(255,240,200,.35)'; g.fillRect(x + w - 8, 70, 8, 400);
+    g.fillStyle = 'rgba(40,28,12,.28)';
+    for (let r = x + 30; r < x + w - 20; r += 18) g.fillRect(r, 96, 6, 360);
+  }
+  const gb = g.createLinearGradient(0, s - 90, 0, s);
+  gb.addColorStop(0, 'rgba(120,95,55,0)'); gb.addColorStop(1, 'rgba(120,95,55,.45)');
+  g.fillStyle = gb; g.fillRect(0, s - 90, s, 90);
+};
+const drawStone = (g, s) => {
+  g.fillStyle = '#d9ccaa'; g.fillRect(0, 0, s, s);
+  for (let r = 0; r < 8; r++) {
+    const y = r * 64; let x = -(r % 2) * 64 - rnd() * 20;
+    while (x < s) {
+      const w = 90 + rnd() * 80, v = 0.88 + rnd() * 0.2;
+      g.fillStyle = `rgba(${(190 * v) | 0},${(172 * v) | 0},${(130 * v) | 0},.55)`;
+      g.fillRect(x, y, w, 64);
+      g.strokeStyle = 'rgba(70,55,30,.55)'; g.lineWidth = 3; g.strokeRect(x, y, w, 64);
+      x += w;
+    }
+  }
+  speckle(g, s, 9000, 0.1, 2);
+  for (let i = 0; i < 8; i++) blob(g, s, rnd() * s, rnd() * s, 50 + rnd() * 80, '90,70,40', 0.12);
+};
+let DMATS = null;
+const dmats = () => {
+  if (DMATS) return DMATS;
+  const sand = makeTex(drawSand, 10, 10);
+  DMATS = {
+    sand: new THREE.MeshStandardMaterial({ map: sand, vertexColors: true, roughness: 1 }),
+    facade: new THREE.MeshStandardMaterial({ map: makeTex(drawFacade, 1, 1), roughness: 0.95 }),
+    stone: new THREE.MeshStandardMaterial({ map: makeTex(drawStone, 1, 1), vertexColors: true, roughness: 0.95, flatShading: true }),
+    plain: new THREE.MeshStandardMaterial({ color: 0xcdbd96, roughness: 0.95 }),
+    rock: new THREE.MeshStandardMaterial({ color: 0x8c6c47, roughness: 1, flatShading: true }),
+    tent: new THREE.MeshStandardMaterial({ color: 0x8a7a5a, roughness: 1, side: THREE.DoubleSide }),
+  };
+  return DMATS;
+};
+
+const dbox = (x0, x1, y0, y1, z0, z1, tu = 6, tv = 6) => {
+  const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0);
+  const uv = g.attributes.uv, dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+  const ext = [[dz, dy], [dz, dy], [dx, dz], [dx, dz], [dx, dy], [dx, dy]];
+  for (let f = 0; f < 6; f++) for (let k = 0; k < 4; k++) {
+    const i = f * 4 + k;
+    uv.setXY(i, uv.getX(i) * ext[f][0] / tu, uv.getY(i) * ext[f][1] / tv);
+  }
+  return g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+};
+
+const pyramidGroup = () => {
+  const mat = dmats().stone, grp = new THREE.Group(), tot = PYR.tiers.reduce((s, t) => s + t[2], 0);
+  const col = new THREE.Color();
+  let y0 = 0;
+  PYR.tiers.forEach(([ax, az, th], ti) => {
+    const b = th * PYR.batter, WS = 28, HS = 5;
+    const g = new THREE.BoxGeometry(2 * ax, th, 2 * az, WS, HS, WS);
+    const p = g.attributes.position, uv = g.attributes.uv;
+    const cnt = [(WS + 1) * (HS + 1), (WS + 1) * (HS + 1), (WS + 1) * (WS + 1), (WS + 1) * (WS + 1), (WS + 1) * (HS + 1), (WS + 1) * (HS + 1)];
+    const ext = [[2 * az, th], [2 * az, th], [2 * ax, 2 * az], [2 * ax, 2 * az], [2 * ax, th], [2 * ax, th]];
+    let f = 0, left = cnt[0];
+    const colors = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) {
+      while (left === 0) left = cnt[++f];
+      left--;
+      uv.setXY(i, uv.getX(i) * ext[f][0] / 6, uv.getY(i) * ext[f][1] / 4.4);
+      const t = (p.getY(i) + th / 2) / th;
+      let x = p.getX(i) * (ax - b * t) / ax, z = p.getZ(i) * (az - b * t) / az, y = p.getY(i);
+      const hx = ax - b * t, ez = az - b * t;
+      const nz = vn((x + 500) / 5 + ti * 7, (y + y0 + 500) / 4) - 0.5;
+      const nx = vn((z + 500) / 5 + ti * 3, (y + y0 + 500) / 4) - 0.5;
+      const edge = Math.abs(x) > hx - 0.01, edgeZ = Math.abs(z) > ez - 0.01;
+      const chip = t > 0.9 ? vn(x / 2 + 40, z / 2) * 0.25 : 0;
+      if (edge) x += Math.sign(x) * (nx * 0.3 - chip);
+      if (edgeZ) z += Math.sign(z) * (nz * 0.3 - chip);
+      p.setXYZ(i, x, y, z);
+      const k = 0.9 + vn(x / 3 + 11, (y + y0) / 2 + z / 3) * 0.14;
+      const gt = (y0 + th * t) / tot;
+      col.setRGB((0.80 + 0.14 * gt) * k, (0.69 + 0.17 * gt) * k, (0.5 + 0.22 * gt) * k);
+      colors.set([col.r, col.g, col.b], i * 3);
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mat);
+    m.position.set(PYR.x, y0 + th / 2, PYR.z);
+    grp.add(m);
+    y0 += th;
+  });
+  return grp;
+};
+
+const complexGroup = () => {
+  const M = dmats(), grp = new THREE.Group(), geos = [];
+  const merged = (list, mat) => { const g = mergeGeometries(list); if (g) { geos.push(g); grp.add(new THREE.Mesh(g, mat)); } };
+  merged(D_SLABS.map(([a, b, c, d]) => dbox(a, b, 0, DJ.wh, c, d, 10.8, 10.5)), M.facade);
+  merged(D_SLABS.map(([a, b, c, d]) => dbox(a - 0.4, b + 0.4, DJ.wh, DJ.wh + 0.6, c - 0.4, d + 0.4)), M.plain);
+  const zN = dWz1 - DJ.col, zS = dWz1 + DJ.wt;
+  merged([...D_COLN_WALLS.map(([a, b, c, d]) => dbox(a, b, 0, 8, c, d + DJ.wt)),
+    dbox(DJ.gate[0] - 3, DJ.gate[1] + 3, 7, 8.2, zN, zS)], M.plain);
+  merged(D_COLS.map((c) => new THREE.CylinderGeometry(0.6, 0.7, 7, 12).translate(c.x, 3.5, c.z)), M.plain);
+  const ch = [];
+  for (const s of D_SHRINES) {
+    ch.push(dbox(s.x - 2.2, s.x + 2.2, 0, 3.6, s.z - 2.2, s.z + 2.2));
+    ch.push(new THREE.CylinderGeometry(2.2, 2.2, 4.6, 12).rotateX(Math.PI / 2).translate(s.x, 3.6, s.z));
+  }
+  ch.push(dbox(D_SERDAB.x - 1.6, D_SERDAB.x + 1.6, 0, 3, D_SERDAB.z - 1.6, D_SERDAB.z + 1.6));
+  merged(ch, M.plain);
+  for (const t of D_TENTS) {
+    const m = new THREE.Mesh(new THREE.ConeGeometry(2.6, 2.4, 4).rotateY(Math.PI / 4).translate(0, 1.2, 0), M.tent);
+    m.position.set(t.x, floorH(t.x, t.z), t.z);
+    grp.add(m); geos.push(m.geometry);
+  }
+  grp.userData.geos = geos;
+  return grp;
+};
+
+const skyDome = () => {
+  const R = 900, g = new THREE.SphereGeometry(R, 24, 14), p = g.attributes.position, c = new Float32Array(p.count * 3);
+  const hz = new THREE.Color(D_FOG), zn = new THREE.Color(0x1d2547), k = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    k.copy(hz).lerp(zn, clamp01(p.getY(i) / R) ** 0.55);
+    c.set([k.r, k.g, k.b], i * 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  const dome = new THREE.Group();
+  const sky = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
+  const disc = (r, col, op, add) => {
+    const m = new THREE.Mesh(new THREE.CircleGeometry(r, 32), new THREE.MeshBasicMaterial({
+      color: col, transparent: op < 1, opacity: op, fog: false, depthWrite: false,
+      blending: add ? THREE.AdditiveBlending : THREE.NormalBlending,
+    }));
+    m.position.copy(D_SUN).multiplyScalar(R * 0.94); m.lookAt(0, 0, 0);
+    return m;
+  };
+  dome.add(sky, disc(130, 0xff9a52, 0.3, true), disc(36, 0xffe6b8, 1, false));
+  dome.traverse((o) => { o.frustumCulled = false; o.renderOrder = -10; });
+  return dome;
+};
+
+const windOn = (audio) => {
+  const ctx = audio.ctx, out = ctx.createGain();
+  out.gain.value = 0; out.connect(audio.sfx || audio.master || ctx.destination);
+  const len = ctx.sampleRate * 2, buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+  s.buffer = buf; s.loop = true; f.type = 'bandpass'; f.frequency.value = 380; f.Q.value = 0.5;
+  lfo.frequency.value = 0.12; lg.gain.value = 160; lfo.connect(lg); lg.connect(f.frequency);
+  s.connect(f); f.connect(out); s.start(); lfo.start();
+  return { g: out, src: [s, lfo] };
+};
+
+const dRockGeo = new THREE.IcosahedronGeometry(1, 1);
+
+registerLevel('desert', {
+  outdoor: true, hilly: true, mission: 'desert', ch: D_CH, load: 4,
+  fog: D_FOG, fogDensity: 0.0032, drain: 0.05, start: { x: 1.5, z: 7.5 },
+  fixed: D_FIXED, path: dPath, spawn: dSpawn, patrol: (pos) => dSpawn(pos, 15, 40),
+  pickups: () => {
+    const P = {}, put = (id, type, x, z) => { P[id] = { type, x, z, taken: false }; };
+    put('bat_a', 'battery', -4, 4); put('wat_a', 'water', 6, 11); put('food_a', 'food', -12, 9);
+    put('bat_b', 'battery', 14, -120); put('wat_b', 'water', -30, -190);
+    put('bat_c', 'battery', 124, -250); put('med_a', 'medkit', 60, -320); put('food_b', 'food', -60, -330);
+    put('bat_d', 'battery', 105, -420); put('wat_c', 'water', 105, -520); put('bat_e', 'battery', -40, -560);
+    put('med_b', 'medkit', 0, -545);
+    return P;
+  },
+  setup(m) {
+    const r = m.r;
+    WORLD_FLAGS.floorFn = floorH;
+    if (r.ambientLight) { r.ambientLight.color.setHex(0xc9916c); r.ambientLight.intensity = 1.1; }
+    if (r.sunLight) {
+      r.sunLight.color.setHex(0xffb676); r.sunLight.intensity = 2.4; r.sunLight.castShadow = false;
+      r.sunLight.position.copy(D_SUN).multiplyScalar(200);
+    }
+    m._far = r.camera.far; r.camera.far = 1600; r.camera.updateProjectionMatrix();
+    m._hid = [r.billboardMesh?.parent, ...(r.lampPool || []), ...(r.tvLights || [])].filter(Boolean);
+    m._hid.forEach((o) => { o.visible = false; });
+    // hide westwood ground/trees if still visible
+    for (const o of [r.ground, r.treeGroup, r.rockGroup, r.buildingGroup, r.roadMesh, r.riverMesh, r.landmarkGroup, r.pyramidGroup, r.pyramidMesh]) {
+      if (o) o.visible = false;
+    }
+    m.sky = skyDome(); m.pyr = pyramidGroup(); m.cx = complexGroup();
+    m.fire = new THREE.PointLight(0xff8a3a, 12, 24, 2); m.fire.position.set(-3, floorH(-3, 12) + 1.2, 12);
+    r.scene.add(m.sky, m.pyr, m.cx, m.fire);
+  },
+  tick(m, pos, dt, p, audio) {
+    if (m.sky) m.sky.position.set(pos.x, 0, pos.z);
+    if (m.fire) m.fire.intensity = 11 + Math.sin(m.t * 13) * 1.5 + Math.sin(m.t * 5.3);
+    if (!m.wind && audio?.ctx) m.wind = windOn(audio);
+    m.wind?.g.gain.setTargetAtTime(0.16 + 0.06 * Math.sin(m.t * 0.2), audio.ctx.currentTime, 0.5);
+  },
+  teardown(m) {
+    WORLD_FLAGS.floorFn = null;
+    if (m._far) { m.r.camera.far = m._far; m.r.camera.updateProjectionMatrix(); }
+    (m._hid || []).forEach((o) => { o.visible = true; });
+    for (const o of [m.sky, m.pyr, m.cx, m.fire]) if (o) m.r.scene.remove(o);
+    m.pyr?.traverse((o) => o.geometry?.dispose());
+    m.cx?.userData.geos?.forEach((g) => g.dispose());
+    try { m.wind?.src.forEach((s) => s.stop()); m.wind?.g.disconnect(); } catch (e) { /* */ }
+  },
+  buildChunk(cx, cz) {
+    const M = dmats(), S = D_CH, x0 = cx * S, z0 = cz * S, group = new THREE.Group();
+    const g = new THREE.PlaneGeometry(S, S, D_SEG, D_SEG).rotateX(-Math.PI / 2);
+    const p = g.attributes.position, nr = g.attributes.normal, col = new Float32Array(p.count * 3), c = new THREE.Color();
+    for (let i = 0; i < p.count; i++) {
+      const wx = x0 + S / 2 + p.getX(i), wz = z0 + S / 2 + p.getZ(i), y = terrainH(wx, wz), e = 0.6;
+      p.setY(i, y);
+      const nx = terrainH(wx - e, wz) - terrainH(wx + e, wz), nz = terrainH(wx, wz - e) - terrainH(wx, wz + e);
+      const l = Math.hypot(nx, 2 * e, nz) || 1;
+      nr.setXYZ(i, nx / l, 2 * e / l, nz / l);
+      const t = clamp01((y + 4) / 12), n = (vn(wx / 3, wz / 3) - 0.5) * 0.16;
+      c.setRGB(0.66 + t * 0.2 + n, 0.49 + t * 0.17 + n, 0.29 + t * 0.12 + n * 0.8);
+      col.set([c.r, c.g, c.b], i * 3);
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const ground = new THREE.Mesh(g, M.sand);
+    ground.position.set(x0 + S / 2, 0, z0 + S / 2);
+    group.add(ground);
+
+    const rocks = [], walls = [];
+    for (let k = 0; k < 7; k++) {
+      const x = x0 + h(cx, cz, 200 + k) * S, z = z0 + h(cx, cz, 300 + k) * S;
+      if (inCx(x, z, 25) || Math.hypot(x, z - 8) < 22 || pyrOut(x, z) < 24) continue;
+      const s = 0.7 + h(cx, cz, 400 + k) * 2.6;
+      rocks.push({ x, z, s, rot: h(cx, cz, 500 + k) * 6.283 });
+      walls.push({ type: 'rock', x, z, r: s * 0.8 });
+    }
+    if (rocks.length) {
+      const im = new THREE.InstancedMesh(dRockGeo, M.rock, rocks.length);
+      const mt = new THREE.Matrix4(), q = new THREE.Quaternion(), pp = new THREE.Vector3(), sc = new THREE.Vector3();
+      rocks.forEach((k, i) => {
+        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), k.rot);
+        im.setMatrixAt(i, mt.compose(pp.set(k.x, terrainH(k.x, k.z) + k.s * 0.2, k.z), q, sc.set(k.s, k.s * 0.6, k.s * 0.8)));
+      });
+      im.instanceMatrix.needsUpdate = true;
+      im.computeBoundingSphere();
+      group.add(im);
+    }
+    return { group, walls, dispose() { g.dispose(); } };
+  },
+});
+
 export class LevelManager {
   constructor(renderer, id) {
     this.r = renderer;
     this.def = LEVELS[id];
+    this.id = id;
+    this.CH = this.def.ch || CH;
     this.chunks = new Map();
     this.spatial = buildSpatialGrid([]);
     this._path = this.def.path || cellPath;
     this.spatial.levelPath = this._path;
-    this.spawn = (pos, min = 20, max = 70) => spawnCell(pos, min, Math.min(max, 70));
-    this.patrol = patrolPoint;
+    this.spawn = this.def.spawn || ((pos, min = 20, max = 70) => spawnCell(pos, min, Math.min(max, 70)));
+    this.patrol = this.def.patrol || patrolPoint;
     this._ck = '';
     this.hum = null;
     this.t = 0;
@@ -731,6 +1075,7 @@ export class LevelManager {
     if (renderer.sunLight) renderer.sunLight.intensity = 0;
 
     const touch = 'ontouchstart' in window || window.matchMedia?.('(pointer: coarse)').matches;
+    this.load = this.def.load ? this.def.load - (touch ? 1 : 0) : LOAD;
     this.pool = [];
     for (let k = 0; k < (touch ? 2 : 4); k++) {
       const L = new THREE.PointLight(0xfff0c8, 0, POOL_DIST, 2);
@@ -743,12 +1088,12 @@ export class LevelManager {
 
   update(pos, dt, p, audio) {
     this.t += dt;
-    const cx = Math.floor(pos.x / CH), cz = Math.floor(pos.z / CH), key = cx + ',' + cz;
+    const cx = Math.floor(pos.x / this.CH), cz = Math.floor(pos.z / this.CH), key = cx + ',' + cz;
     if (key !== this._ck) {
       this._ck = key;
       const want = new Set();
-      for (let i = -LOAD; i <= LOAD; i++)
-        for (let j = -LOAD; j <= LOAD; j++) {
+      for (let i = -this.load; i <= this.load; i++)
+        for (let j = -this.load; j <= this.load; j++) {
           const k = (cx + i) + ',' + (cz + j);
           want.add(k);
           if (!this.chunks.has(k)) {
@@ -764,7 +1109,7 @@ export class LevelManager {
         c.dispose?.();
         this.chunks.delete(k);
       }
-      Object.assign(this.spatial, buildSpatialGrid([...this.chunks.values()].flatMap((c) => c.walls)));
+      Object.assign(this.spatial, buildSpatialGrid([...this.chunks.values()].flatMap((c) => c.walls).concat(this.def.fixed || [])));
       this.spatial.levelPath = this._path;
     }
     if (p && p.alive !== false) p.sanity = Math.max(0, (p.sanity ?? 100) - this.def.drain * dt);

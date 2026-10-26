@@ -14,9 +14,9 @@ function pickWeighted(table) {
 }
 
 const TABLE = {
-  shaken: [['falseStep', 1]],
-  low: [['falseStep', 3], ['figure', 2]],
-  critical: [['figure', 3], ['falseStep', 2], ['fakeClue', 1]],
+  shaken:   [['falseStep', 2], ['figure', 1]],
+  low:      [['falseStep', 2], ['figure', 2], ['flyby', 1]],
+  critical: [['figure', 3], ['flyby', 2], ['falseStep', 2], ['fakeClue', 1]],
 };
 
 function behind(p, d = 8) {
@@ -49,6 +49,10 @@ export class HallucinationDirector {
     for (let i = this._ghosts.length - 1; i >= 0; i--) {
       const g = this._ghosts[i];
       g.life -= dt;
+      if (g.vx || g.vz) {
+        g.x += (g.vx || 0) * dt; g.z += (g.vz || 0) * dt;
+        g.mesh?.position.set(g.x, g.mesh.position.y, g.z);
+      }
       const d = Math.hypot(
         (cam?.position?.x ?? player.position.x) - g.x,
         (cam?.position?.z ?? player.position.z) - g.z
@@ -60,7 +64,7 @@ export class HallucinationDirector {
     }
 
     if ((this.t -= dt) > 0 || !TABLE[tier]) return;
-    this.t = (tier === 'critical' ? 12 : 25) * (0.7 + Math.random() * 0.6);
+    this.t = (tier === 'critical' ? 8 : tier === 'low' ? 14 : 22) * (0.7 + Math.random() * 0.6);
     const kind = pickWeighted(TABLE[tier]);
     if (typeof this[kind] === 'function') this[kind](player, cam);
   }
@@ -96,5 +100,17 @@ export class HallucinationDirector {
     }
     this._ghosts = [];
     this.t = 8;
+  }
+
+  flyby(p) {
+    if (!this.renderer?.spawnGhost) return;
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const start = aheadOf(p, 14, side * 16);
+    const mesh = this.renderer.spawnGhost(start);
+    const yaw = p.rotation?.yaw || 0;
+    const speed = 14;
+    this._ghosts = this._ghosts || [];
+    this._ghosts.push({ ...start, x: start.x, z: start.z, life: 2.5, vanishIfWithin: 3,
+      vx: -side * Math.cos(yaw) * speed, vz: side * Math.sin(yaw) * speed, mesh });
   }
 }

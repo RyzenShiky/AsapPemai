@@ -1,6 +1,6 @@
 import { MonsterPerception } from '../ai/Perception.js';
 import { pickSearchTarget } from '../ai/StateMachine.js';
-import { clampToWorld, WORLD } from '../core/WorldConfig.js';
+import { clampToWorld, WORLD, PLAYER_RUN } from '../core/WorldConfig.js';
 import { resolveCollisions, groundHeight } from '../core/Collision.js';
 import { canSee, openness } from '../ai/Vision.js';
 import { findPath } from '../ai/Pathfinding.js';
@@ -22,6 +22,11 @@ const BREACH = {
 const DOOR_REACH = 2.4;
 const DOOR_STANDOFF = 1.2;
 const STATE_SPEED = { INVESTIGATE: 1.3, SEARCH: 1, CHASE: 2, LOST_TARGET: 1.6, AMBUSH: 1.8 };
+const SIGNATURE = {
+  smily:  (m, p, d, facing) => (d < 35 && facing > 0.75 ? 0.1 : 1.3),
+  boiled: (m, p) => ((p.noiseAge ?? 99) < 1.5 ? 1.35 : 1),
+  shadow: (m, p) => (p.flashlight || p.lighter ? 1 : 1.2),
+};
 
 const PATROL_ANCHORS = [
   { x: -150, z: -150 },
@@ -114,7 +119,13 @@ export class MonsterController {
       const s = this.perception?.suspicion;
       if (s && typeof s.value === 'number') s.value = Math.max(0, s.value - 10 * dt);
     }
-    return 1;
+    const sig = SIGNATURE[ROSTER[this.index]];
+    if (!sig) return 1;
+    const dx = m.position.x - p.position.x, dz = m.position.z - p.position.z;
+    const d = Math.hypot(dx, dz);
+    const yaw = p.rotation.yaw;
+    const facing = d > 0 ? (dx * -Math.sin(yaw) + dz * -Math.cos(yaw)) / d : 0;
+    return sig(m, p, d, facing);
   }
 
   update(dt, now) {
@@ -194,6 +205,9 @@ export class MonsterController {
 
     if (m.aiState !== this._prevAi) {
       if (m.aiState === 'SEARCH') this._searchStep = 0;
+      if (this._prevAi === 'PATROL' && m.aiState === 'INVESTIGATE' && ROSTER[this.index] === 'siren') {
+        try { this.state._audio?.playSiren?.(); } catch (e) { /* */ }
+      }
       this._prevAi = m.aiState;
     }
 
@@ -340,7 +354,12 @@ export class MonsterController {
     const goal = this._goal(m, tgt);
     if (!goal) return;
     const door = this._blockingDoor(m, goal);
-    this.moveToward(m, door ? this._doorApproach(m, door) : goal, dt, base * (STATE_SPEED[s] ?? 1) * frenzy);
+    let spd = base * (STATE_SPEED[s] ?? 1) * frenzy;
+    if (s === 'CHASE' || s === 'LOST_TARGET') {
+      const gap = distXZ(m.position, goal);
+      spd = Math.min(spd, PLAYER_RUN * (gap > 20 ? 1.2 : 1.06));
+    }
+    this.moveToward(m, door ? this._doorApproach(m, door) : goal, dt, spd);
   }
 
   _breachStart(m, d) {

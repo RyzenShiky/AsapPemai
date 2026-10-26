@@ -4,9 +4,9 @@ export const SANITY_MAX = 100;
  * Tiers, from calmest to most broken. Thresholds are inclusive upper bounds.
  */
 const TIERS = [
-  { max: 20, name: 'critical' },
-  { max: 45, name: 'low' },
-  { max: 70, name: 'shaken' },
+  { max: 30, name: 'critical' },
+  { max: 55, name: 'low' },
+  { max: 80, name: 'shaken' },
   { max: Infinity, name: 'stable' },
 ];
 
@@ -41,7 +41,7 @@ export class SanityManager {
     let delta = 0;
 
     // Darkness is unsettling, but hiding indoors feels safer even in the dark.
-    if (isDark && !p.isHiding) delta -= 1.1 * dt;
+    if (isDark && !p.isHiding) delta -= 1.6 * dt;
 
     // Fear ramps sharply as a monster gets close — proximity, not just detection.
     if (nearestMonsterDist < 25) {
@@ -53,8 +53,8 @@ export class SanityManager {
     if (p.isHiding && p.isHoldingBreath) delta -= 0.6 * dt;
 
     // Slow natural recovery only when nothing threatening is nearby.
-    if (delta === 0 && nearestMonsterDist > 40) {
-      delta += 3.2 * dt;
+    if (delta === 0 && nearestMonsterDist > 60) {
+      delta += 1.2 * dt;
     }
 
     p.sanity = Math.max(0, Math.min(SANITY_MAX, p.sanity + delta));

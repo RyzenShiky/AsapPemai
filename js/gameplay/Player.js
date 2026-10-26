@@ -1,4 +1,4 @@
-import { clampToWorld } from '../core/WorldConfig.js';
+import { clampToWorld, PLAYER_RUN } from '../core/WorldConfig.js';
 import { isInsideBuilding } from '../core/Buildings.js';
 import { resolveCollisions, groundHeight } from '../core/Collision.js';
 import { binds, isBound } from '../input/Bindings.js';
@@ -8,8 +8,8 @@ import { seatToWorld } from './Vehicle.js';
 import { ITEMS, invWeight, MAX_WEIGHT } from './Items.js';
 const HUNGER_RATE = 0.12, THIRST_RATE = 0.18;
 
-const WALK = 2.8, RUN = 5.5, CROUCH = 1.4;
-const STAMINA_DRAIN = 25, STAMINA_REGEN = 18;
+const WALK = 2.8, RUN = PLAYER_RUN, CROUCH = 1.4;
+const STAMINA_DRAIN = 16, STAMINA_REGEN = 18;
 const PLAYER_RADIUS = 0.4;
 
 export class PlayerController {

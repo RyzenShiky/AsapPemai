@@ -50,6 +50,7 @@ let heartAcc = 0;
 let lastNearDist = Infinity;
 let sanity = new SanityManager();
 let jumpscare = new JumpscareManager();
+let caughtStarted = false;
 let pacing = new PacingDirector();
 let dread = null;
 let vehicleControllers = [];
@@ -146,10 +147,11 @@ async function init() {
   audio = new AudioManager();
   await audio.init();
   dread = new DreadSequencer(audio);
+  if (state) state._audio = audio;
   const _rawCol = buildColliders();
   colliders = buildSpatialGrid(_rawCol);
   window.__wallsOnly = buildSpatialGrid(_rawCol.filter((c) => c.type === 'wall'));
-  if (LEVELS[new URLSearchParams(location.search).get('level')]) applyBackroomsMonsters();
+  { const L = LEVELS[new URLSearchParams(location.search).get('level')]; if (L && !L.outdoor) applyBackroomsMonsters(); }
   renderer = new Renderer();
   await renderer.init(canvas);
   const lv = new URLSearchParams(location.search).get('level');
@@ -313,7 +315,8 @@ async function setupLocalGame(fromSave = false) {
   state._spawnFn = level
     ? (pl) => level.spawn(pl[(Math.random() * pl.length) | 0], 40, 80)
     : null;
-  if (level) Object.assign(state.data.player.position, { x: 1.5, y: 1.7, z: 7.5 });
+  if (level) Object.assign(state.data.player.position, { x: level.def.start?.x ?? 1.5, y: 1.7, z: level.def.start?.z ?? 7.5 });
+  if (level?.def.pickups && !resumed) state.data.pickups = level.def.pickups();
   while (state.data.monsters.length < MONSTER_COUNT) {
     const i = state.data.monsters.length;
     state.data.monsters.push({
@@ -383,6 +386,9 @@ async function setupLocalGame(fromSave = false) {
   appliedPickups.clear();
   sanity = new SanityManager();
   jumpscare = new JumpscareManager();
+  caughtStarted = false;
+  if (state) state._audio = audio;
+  renderer?._endJumpscare?.();
   pacing = new PacingDirector();
   worldDirector = null;
   hallu = null;
@@ -394,7 +400,9 @@ async function setupLocalGame(fromSave = false) {
 
   mission?.dispose(); tutorial?.dispose(); subs?.dispose();
   pickOne?.dispose(); pickOne = null;
-  const mDef = MISSIONS[level ? 'backrooms0' : 'world'];
+  const ch = new URLSearchParams(location.search).get('ch');
+  const key = (ch && MISSIONS[ch]) ? ch : (level ? (level.def.mission || 'backrooms0') : 'world');
+  const mDef = MISSIONS[key];
   subs = new Subtitles(document.getElementById('hud'));
   mission = new Mission(mDef, missionIO());
   if (state.data.mission && state.data.mission.id === mDef.id) {
@@ -403,10 +411,10 @@ async function setupLocalGame(fromSave = false) {
     mission.start();
   }
   tutorial = new Tutorial(document.getElementById('hud'));
-  renderer?.spawnMissionMarkers?.(mDef.anchors, !!level);
+  renderer?.spawnMissionMarkers?.(mDef.anchors, !!level && !level.def.hilly);
   renderer?.updateMissionMarkers?.(mission.doneIds());
   renderer?.setMissionMarkersVisible?.(mission.active);
-  if (level && level.id === 'backrooms0') { const bad = validateAnchors(mDef); if (bad?.length) console.warn('Anchor Backrooms tak terjangkau:', bad); }
+  if (level && !level.def.hilly) { const bad = validateAnchors(mDef); if (bad?.length) console.warn('Anchor tak terjangkau:', bad); }
 
   player.onThrow = (from, to) => {
     if (renderer && renderer.spawnThrowable) renderer.spawnThrowable(from, to);
@@ -779,13 +787,20 @@ function tickDoorBash() {
   }
 }
 
+const BIOME_MAPS = new Set();
+const applyMapParam = (u, id) => {
+  u.searchParams.delete('level'); u.searchParams.delete('biome');
+  if (BIOME_MAPS.has(id)) u.searchParams.set('biome', id);
+  else if (id !== 'world') u.searchParams.set('level', id);
+};
 const currentMap = () => {
-  const l = new URLSearchParams(location.search).get('level');
-  return (typeof LEVELS !== 'undefined' && LEVELS[l]) ? l : 'world';
+  const q = new URLSearchParams(location.search);
+  if (BIOME_MAPS.has(q.get('biome'))) return q.get('biome');
+  return (typeof LEVELS !== 'undefined' && LEVELS[q.get('level')]) ? q.get('level') : 'world';
 };
 function switchMap(id) {
   const u = new URL(location.href);
-  if (id === 'world') u.searchParams.delete('level'); else u.searchParams.set('level', id);
+  applyMapParam(u, id);
   if (profile?.provider !== 'google') sessionStorage.setItem('autoGuest', '1');
   location.href = u.toString();
 }
@@ -903,6 +918,7 @@ function wireUI(canvas) {
   });
 
   let settingsFromGame = false;
+  let settingsFromPause = false;
   document.getElementById('btn-hud-settings')?.addEventListener('click', () => {
     document.exitPointerLock?.();
     settingsFromGame = true;
@@ -993,6 +1009,11 @@ function wireUI(canvas) {
     document.getElementById('settings-screen').classList.add('hidden');
     if (settingsFromGame) {
       settingsFromGame = false;
+      if (settingsFromPause) {
+        settingsFromPause = false;
+        document.getElementById('pause-overlay')?.classList.remove('hidden');
+        return;
+      }
       document.getElementById('game-canvas')?.focus();
       if (typeof touch !== 'undefined' && touch && inputMode() === 'touch') touch.show();
       return;
@@ -1094,13 +1115,12 @@ function wireUI(canvas) {
       enterLobby();
     } catch (e) {
       room = null;
-      if (e.mapMismatch && (e.mapMismatch === 'world' || (typeof LEVELS !== 'undefined' && LEVELS[e.mapMismatch])) && !sessionStorage.getItem('joinTried')) {
+      if (e.mapMismatch && (e.mapMismatch === 'world' || BIOME_MAPS.has(e.mapMismatch) || (typeof LEVELS !== 'undefined' && LEVELS[e.mapMismatch])) && !sessionStorage.getItem('joinTried')) {
         sessionStorage.setItem('joinTried', '1');
         sessionStorage.setItem('pendingJoin', code);
         if (profile?.provider !== 'google') sessionStorage.setItem('autoGuest', '1');
         const u = new URL(location.href);
-        if (e.mapMismatch === 'world') u.searchParams.delete('level');
-        else u.searchParams.set('level', e.mapMismatch);
+        applyMapParam(u, e.mapMismatch);
         location.href = u.toString();
         return;
       }
@@ -1147,6 +1167,8 @@ function wireUI(canvas) {
       if (touch && inputMode() === 'touch') touch.show();
       document.getElementById('game-canvas')?.focus();
       deadShown = false;
+      caughtStarted = false;
+      renderer?._endJumpscare?.();
       startLoop();
       return;
     }
@@ -1171,6 +1193,7 @@ function wireUI(canvas) {
   document.getElementById('btn-pause-resume')?.addEventListener('click', () => resumeFromPause());
   document.getElementById('btn-pause-settings')?.addEventListener('click', () => {
     settingsFromGame = true;
+    settingsFromPause = true;
     document.getElementById('pause-overlay')?.classList.add('hidden');
     document.getElementById('btn-settings')?.click();
   });
@@ -1333,27 +1356,73 @@ function tickJumpscare(dt, nearestMonsterDistVal, nearestMonsterState) {
   if (kind) showJumpscare(kind);
 }
 
-function showJumpscare(kind) {
+function nearestMonsterIndex(maxDist = Infinity) {
+  const p = state.data.player.position;
+  let best = -1, bd = maxDist;
+  state.data.monsters.forEach((m, i) => {
+    if (m.active === false) return;
+    const d = Math.hypot(m.position.x - p.x, m.position.z - p.z);
+    if (d < bd) { bd = d; best = i; }
+  });
+  return best;
+}
+
+function flashOverlay(cls = '') {
   const overlay = document.getElementById('jumpscare-overlay');
-  if (audio) audio.playJumpscareStinger();
-  const app = document.getElementById('app');
-  if (app) {
-    app.classList.remove('screen-shake');
-    void app.offsetWidth;
-    app.classList.add('screen-shake');
-  }
   if (!overlay) return;
-  overlay.classList.remove('hidden', 'hallucination');
-  if (kind === 'hallucination') overlay.classList.add('hallucination');
+  overlay.classList.remove('hidden', 'hallucination', 'caught');
+  if (cls) overlay.classList.add(cls);
   void overlay.offsetWidth;
   overlay.classList.add('visible');
   clearTimeout(jumpscareHideTimer);
-  jumpscareHideTimer = setTimeout(hideJumpscare, 420);
+  if (cls !== 'caught') jumpscareHideTimer = setTimeout(hideJumpscare, 420);
 }
+
+function shake() {
+  const app = document.getElementById('app');
+  if (!app) return;
+  app.classList.remove('screen-shake');
+  void app.offsetWidth;
+  app.classList.add('screen-shake');
+}
+
+function showJumpscare(kind) {
+  const p = state?.data?.player;
+  if (!p || !audio) return;
+  hallu ??= new HallucinationDirector(audio, renderer);
+
+  switch (kind) {
+    case 'monster': {
+      const idx = nearestMonsterIndex(45);
+      if (idx >= 0 && renderer?.startJumpscare({ kind: 'pop', monsterIndex: idx, duration: 0.8 })) {
+        audio.playJumpscareStinger(); flashOverlay(); shake();
+      }
+      break;
+    }
+    case 'doorSlam':
+      dread?.trigger('door-slam', p.position);
+      shake();
+      break;
+    case 'flyby':
+      hallu.flyby(p);
+      audio.playWhisper?.(0.5);
+      break;
+    case 'falseAlarm':
+      hallu.figure?.(p);
+      break;
+    case 'hallucination':
+      hallu.figure?.(p);
+      audio.playWhisper?.(0.6);
+      flashOverlay('hallucination');
+      break;
+  }
+}
+window.__scare = (k) => showJumpscare(k);
+
 
 function hideJumpscare() {
   const overlay = document.getElementById('jumpscare-overlay');
-  if (overlay) overlay.classList.remove('visible', 'hallucination');
+  if (overlay) overlay.classList.remove('visible', 'hallucination', 'caught');
   clearTimeout(jumpscareHideTimer);
 }
 
@@ -1443,7 +1512,8 @@ function startLoop() {
   let locKey = '', locEl = null;
   function step() {
     if (!running || paused) return;
-    const dt = Math.min(0.05, clock.tick()); // clamp: avoid spiral on lag spikes
+    const raw = clock.tick();
+    const dt = Math.min(0.05, raw); // clamp: avoid spiral on lag spikes
     const now = performance.now() / 1000;
     const isAuthority = mode === 'solo' || (room && room.isHost);
 
@@ -1477,7 +1547,14 @@ function startLoop() {
             .map(([u]) => u);
           // include local self if passenger somehow - skip
         }
-        v.driveUpdate(dt, player.keys, colliders, state, audio, v.driverUid || myUid);
+        {
+          let left = Math.min(raw, 0.12);
+          while (left > 1e-4) {
+            const h = Math.min(left, 1 / 30);
+            v.driveUpdate(h, player.keys, colliders, state, audio, v.driverUid || myUid);
+            left -= h;
+          }
+        }
         v.checkMonsterHits(state.data.monsters, now, (dmg) => {
           const pl = state.data.player;
           if (pl.isDowned) {
@@ -1502,7 +1579,8 @@ function startLoop() {
     if (room && room.remoteVehicles) {
       const list = [];
       for (const [id, rv] of Object.entries(room.remoteVehicles)) {
-        if (rv.driver === myUid) continue; // penumpang tetap terima update posisi
+        const mine = state.data.player.ridingVehicleId === id && state.data.player.ridingRole === 'driver';
+        if (rv.driver === myUid || mine) continue; // driver lokal = otoritas
         let v = vehicleControllers.find((x) => x.id === id);
         if (!v) {
           v = new VehicleController(rv.type || 'motor', { x: rv.x, y: rv.y, z: rv.z }, id);
@@ -1534,7 +1612,7 @@ function startLoop() {
         m._onGhostEvent = () => {
           if (pacing.canTriggerEvent(now)) {
             pacing.onEventFired(now, 50, 110);
-            if (dread) dread.trigger('distant-knock');
+            if (dread) dread.trigger('distant-knock', state.data.player.position);
           }
         };
         m.update(dt, now);
@@ -1589,6 +1667,19 @@ function startLoop() {
       showGameOver(false, true);
     }
     if (state.data.progress.gameOver) {
+      if (!state.data.progress.win && !room) {
+        if (!caughtStarted) {
+          const idx = nearestMonsterIndex(18);
+          caughtStarted = idx >= 0 &&
+            !!renderer?.startJumpscare({ kind: 'caught', monsterIndex: idx, duration: 1.9 });
+          if (caughtStarted) { audio.playJumpscareStinger(); flashOverlay('caught'); shake(); }
+        }
+        if (caughtStarted && renderer?.isJumpscareActive?.() && !renderer.jumpscareDone()) {
+          const pl = state.data.player;
+          renderer.render(state.data, player.eyePosition, pl.rotation.yaw, pl.rotation.pitch, dt);
+          return;
+        }
+      }
       showGameOver(state.data.progress.win);
       if (room && room.isHost) room.writeGame(state.data.progress, state.data.world.weather);
       return;
@@ -1944,11 +2035,11 @@ function startLoop() {
 
     // Pacing-driven dread / world mutation
     if (pacing.canTriggerEvent(now) && state.data.world.elapsed > 25) {
-      if (Math.random() < 0.0008) {
+      if (Math.random() < dt * 0.06) {
         pacing.onEventFired(now, 60, 120);
-        dread?.trigger(Math.random() < 0.5 ? 'distant-knock' : 'branch-snap');
+        dread?.trigger(['distant-knock', 'branch-snap', 'door-slam', 'footsteps-behind'][(Math.random() * 4) | 0], state.data.player.position);
       }
-      if (state.data.world.elapsed > 90 && (state.data.world.worldEvents?.familyPhoto?.stage || 0) === 0 && Math.random() < 0.0004) {
+      if (state.data.world.elapsed > 90 && (state.data.world.worldEvents?.familyPhoto?.stage || 0) === 0 && Math.random() < dt * 0.025) {
         pacing.onEventFired(now, 80, 140);
         state.triggerWorldEvent('familyPhoto', 1);
       }

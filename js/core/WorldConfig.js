@@ -10,6 +10,31 @@ export const WORLD = {
   areaM2: (TILES * 25) ** 2,
 };
 export const WORLD_FLAGS = { endless: false };
+export const PLAYER_RUN = 5.5;
+
+export const BIOME = new URLSearchParams(location.search).get('biome') === 'desert' ? 'desert' : 'forest';
+export const PYRAMID = {
+  x: 170, z: 175,
+  // [halfX, halfZ, height] bottom→top; ~121×109 m base, 62.5 m tall
+  tiers: [[60.5, 54.5, 12], [53, 47, 11], [45.5, 39.5, 10.5], [38, 32, 10], [30.5, 24.5, 10], [23, 17, 9]],
+  batter: 3.2,
+};
+export const onPyramid = (x, z, m = 0) => BIOME === 'desert'
+  && Math.abs(x - PYRAMID.x) < PYRAMID.tiers[0][0] + m && Math.abs(z - PYRAMID.z) < PYRAMID.tiers[0][1] + m;
+
+export function pyramidHeight(x, z) {
+  if (BIOME !== 'desert') return 0;
+  const dx = Math.abs(x - PYRAMID.x), dz = Math.abs(z - PYRAMID.z), b = PYRAMID.batter;
+  let y0 = 0, best = 0;
+  for (const [ax, az, h] of PYRAMID.tiers) {
+    if (dx <= ax && dz <= az) {
+      const t = Math.min(1, (ax - dx) / b, (az - dz) / b);
+      best = Math.max(best, y0 + h * t);
+    }
+    y0 += h;
+  }
+  return best;
+}
 
 export function worldToTile(x, z) {
   const tx = Math.floor((x + WORLD.half) / WORLD.tileSize);

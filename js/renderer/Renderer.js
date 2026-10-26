@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
-import { WORLD, tileSeed, ROADS, onRoad, RIVER, LANDMARKS, sample } from '../core/WorldConfig.js';
+import { WORLD, tileSeed, ROADS, onRoad, RIVER, LANDMARKS, sample, BIOME, PYRAMID, onPyramid } from '../core/WorldConfig.js';
 import { buildLampSites, lampLevel } from '../core/StreetLamps.js';
 import { MONSTER_TYPES, ROSTER } from '../core/MonsterTypes.js';
 import { VEHICLE_FACE } from '../gameplay/Vehicle.js';
@@ -90,6 +90,8 @@ export class Renderer {
     this.scene.add(this.flashlight);
     this.flashlightFill = new THREE.PointLight(0xffe8c8, 0, 8, 2);
     this.scene.add(this.flashlightFill);
+    this._jsLight = new THREE.PointLight(0xff4a30, 0, 14, 2);
+    this.scene.add(this._jsLight);
     this.lighterLight = new THREE.PointLight(0xff9a3c, 0, 10, 2);
     this.scene.add(this.lighterLight);
 
@@ -125,12 +127,12 @@ export class Renderer {
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const y = pos.getY(i);
-      pos.setZ(i, groundHeight(x, -y));
+      pos.setZ(i, groundHeight(x, -y, true));
     }
     groundGeo.computeVertexNormals();
     this.ground = new THREE.Mesh(
       groundGeo,
-      new THREE.MeshStandardMaterial({ color: 0x1a1f16, roughness: 0.95 })
+      new THREE.MeshStandardMaterial({ color: BIOME === 'desert' ? 0x8f7448 : 0x1a1f16, roughness: 0.95 })
     );
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.receiveShadow = true;
@@ -193,7 +195,9 @@ export class Renderer {
     // Roads + street lamps first (light assets)
     this.buildRoads();
     this.buildRiver();
+    if (BIOME === 'desert' && this.riverMesh) this.riverMesh.visible = false;
     this.buildLandmarks();
+    this.buildPyramid();
     this.buildBillboard();
     this.buildLamps(buildLampSites(), gfx);
     this._initTVLights(gfx);
@@ -965,7 +969,14 @@ export class Renderer {
       }
       return g;
     };
-    const trunkGeo = new THREE.CylinderGeometry(0.12, 0.34, 5.5, 6);
+    const desert = BIOME === 'desert';
+    const trunkGeo = desert
+      ? mergeGeometries([
+          new THREE.CylinderGeometry(0.26, 0.32, 3.2, 8).translate(0, -1.15, 0),
+          new THREE.CylinderGeometry(0.13, 0.13, 0.7, 6).rotateZ(Math.PI / 2).translate(0.55, -1.0, 0),
+          new THREE.CylinderGeometry(0.12, 0.12, 0.9, 6).translate(0.9, -0.55, 0),
+        ])
+      : new THREE.CylinderGeometry(0.12, 0.34, 5.5, 6);
     const crownGeo = mergeGeometries(
       [[2.0, 2.6, 3.2], [1.55, 2.4, 4.6], [1.05, 2.2, 5.9]].map(([r, h, y]) =>
         jitter(new THREE.ConeGeometry(r, h, 7).translate(0, y - 2.75, 0), 0.25)
@@ -980,10 +991,10 @@ export class Renderer {
           .translate(0, y - 2.75, 0)
       )
     );
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2a1c12, roughness: 0.95, flatShading: true });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: (typeof desert !== 'undefined' && desert) ? 0x3f6b3a : 0x2a1c12, roughness: 0.95, flatShading: true });
     const crownMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, flatShading: true });
     const rockGeo = new THREE.DodecahedronGeometry(1, 0);
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x3a3a36, roughness: 0.88 });
+    const rockMat = new THREE.MeshStandardMaterial({ color: (typeof desert !== 'undefined' && desert) ? 0x8a6d46 : 0x3a3a36, roughness: 0.88 });
 
     const trunks = [];
     const crowns = [];
@@ -1002,7 +1013,7 @@ export class Renderer {
           const x = ox + (sx - 0.5) * (ts - 2);
           const z = oz + (sz - 0.5) * (ts - 2);
           if (Math.hypot(x, z) < 8) continue;
-          if (nearBuilding(x, z, 9) || onRoad(x, z, 5)) continue;
+          if (nearBuilding(x, z, 9) || onRoad(x, z, 5) || onPyramid(x, z, 8)) continue;
           const r1 = tileSeed(tx, tz, 400 + i), r2 = tileSeed(tx, tz, 420 + i), r3 = tileSeed(tx, tz, 440 + i);
           const t = {
             x, z, scale,
@@ -1010,7 +1021,7 @@ export class Renderer {
             tx: (r2 - 0.5) * 0.12, tz: (r3 - 0.5) * 0.12, tone: r1, dead: r2 < 0.22,
           };
           trunks.push(t);
-          (t.dead ? deads : crowns).push(t);
+          if (!desert) (t.dead ? deads : crowns).push(t);
         }
         const rockCount = 1 + Math.floor(tileSeed(tx, tz, 99) * 2);
         for (let i = 0; i < rockCount; i++) {
@@ -1019,7 +1030,7 @@ export class Renderer {
           const x = ox + (sx - 0.5) * (ts - 3);
           const z = oz + (sz - 0.5) * (ts - 3);
           if (Math.hypot(x, z) < 6) continue;
-          if (nearBuilding(x, z, 7) || onRoad(x, z, 4)) continue;
+          if (nearBuilding(x, z, 7) || onRoad(x, z, 4) || onPyramid(x, z, 8)) continue;
           const sc = 0.6 + tileSeed(tx, tz, 300 + i) * 1.4;
           rocks.push({ x, z, scale: sc, rot: sx * 2 });
         }
@@ -1041,6 +1052,7 @@ export class Renderer {
     place(trunkIM, trunks, 2.75, false);
     place(crownIM, crowns, 2.75, true);
     place(deadIM, deads, 2.75, false);
+    if (desert) crownIM.count = deadIM.count = 0;
     [trunkIM, crownIM, deadIM].forEach((im) => {
       im.instanceMatrix.needsUpdate = true;
       if (im.instanceColor) im.instanceColor.needsUpdate = true;
@@ -1107,6 +1119,40 @@ export class Renderer {
     } catch (e) {
       console.warn('buildRiver', e);
     }
+  }
+
+  buildPyramid() {
+    if (BIOME !== 'desert') return;
+    const { x, z, tiers, batter } = PYRAMID;
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const g = c.getContext('2d');
+    g.fillStyle = '#e7dcc2'; g.fillRect(0, 0, 128, 128);
+    g.strokeStyle = 'rgba(90,70,40,.5)'; g.lineWidth = 2;
+    for (let r = 0; r < 4; r++) {
+      g.beginPath(); g.moveTo(0, r * 32); g.lineTo(128, r * 32);
+      for (let k = r % 2 ? 0 : 32; k < 128; k += 64) { g.moveTo(k, r * 32); g.lineTo(k, r * 32 + 32); }
+      g.stroke();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(20, 3);
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, flatShading: true });
+    const grp = (this.pyramidGroup = new THREE.Group());
+    let y0 = 0;
+    for (const [ax, az, h] of tiers) {
+      const geo = new THREE.BoxGeometry(ax * 2, h, az * 2);
+      const p = geo.attributes.position;
+      for (let i = 0; i < p.count; i++) if (p.getY(i) > 0) {
+        p.setX(i, p.getX(i) * (ax - batter) / ax);
+        p.setZ(i, p.getZ(i) * (az - batter) / az);
+      }
+      geo.computeVertexNormals();
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y0 + h / 2, z);
+      grp.add(m);
+      y0 += h;
+    }
+    this.scene.add(grp);
   }
 
   buildLandmarks() {
@@ -1596,6 +1642,79 @@ export class Renderer {
     return g;
   }
 
+  startJumpscare({ kind = 'pop', monsterIndex = 0, duration = 0.8 } = {}) {
+    const mesh = this.monsterMeshes[monsterIndex];
+    if (!mesh) return false;
+    this._endJumpscare();
+    const cfg = MONSTER_TYPES[ROSTER[monsterIndex]] || MONSTER_TYPES.shadow;
+    this._js = { kind, mesh, cfg, idx: monsterIndex, t: 0, dur: duration,
+                 baseFov: this.camera.fov, yawStart: null, yawTarget: 0, d0: 4 };
+    mesh.visible = true;
+    const spr = this.nameSprites.get('monster-' + monsterIndex);
+    if (spr) { this._jsSpr = { spr, was: spr.visible }; spr.visible = false; }
+    try { if (mesh.userData.anim) this._playAction(mesh.userData.anim, 'Attack', true); } catch (e) { /* */ }
+    return true;
+  }
+
+  isJumpscareActive() { return !!this._js; }
+  jumpscareDone() { return !this._js || this._js.t >= this._js.dur; }
+
+  _endJumpscare() {
+    if (!this._js) return;
+    this.camera.fov = this._js.baseFov;
+    this.camera.updateProjectionMatrix();
+    if (this._jsLight) this._jsLight.intensity = 0;
+    if (this._jsSpr) { this._jsSpr.spr.visible = this._jsSpr.was; this._jsSpr = null; }
+    this._js = null;
+  }
+
+  _tickJumpscare(dt, eye, yaw, pitch) {
+    const js = this._js;
+    js.t = Math.min(js.dur, js.t + (dt || 0.016));
+    const caught = js.kind === 'caught';
+    if (js.t >= js.dur && !caught) { this._endJumpscare(); return null; }
+
+    const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const { mesh, cfg } = js;
+    const h = cfg.h || 2.4;
+    let camYaw = yaw, camPitch = pitch, d;
+
+    if (caught) {
+      if (js.yawStart === null) {
+        js.yawStart = yaw;
+        const dx = mesh.position.x - eye.x, dz = mesh.position.z - eye.z;
+        js.yawTarget = Math.atan2(-dx, -dz);
+        js.d0 = Math.min(6, Math.max(1.5, Math.hypot(dx, dz)));
+      }
+      camYaw = js.yawStart + wrap(js.yawTarget - js.yawStart) * ease(js.t / 0.22);
+      d = js.d0 + (Math.max(1, h * 0.42) - js.d0) * ease(js.t / 0.55);
+    } else {
+      d = Math.max(2.4, h * 0.6) * (1 + 0.8 * (1 - ease(js.t / 0.12)));
+    }
+
+    const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw);
+    mesh.visible = true;
+    mesh.position.set(eye.x + fx * d, 0, eye.z + fz * d);
+    mesh.rotation.y = Math.atan2(-(eye.x - mesh.position.x), -(eye.z - mesh.position.z)) + (mesh.userData.face ?? Math.PI);
+
+    const wantPitch = Math.atan2(Math.min(h * 0.82, 3.4) - eye.y, d);
+    camPitch = pitch + (wantPitch - pitch) * (caught ? ease(js.t / 0.22) : 0.6);
+
+    const k = js.t / js.dur;
+    const amp = caught ? 0.015 + 0.05 * k : 0.04 * (1 - k);
+    camYaw += (Math.random() - 0.5) * amp * 2;
+    camPitch += (Math.random() - 0.5) * amp * 2;
+    this.camera.fov = js.baseFov + 28 * (caught ? ease(js.t / 0.35) : ease(js.t / 0.1) * (1 - k));
+    this.camera.updateProjectionMatrix();
+
+    if (this._jsLight) {
+      this._jsLight.position.set(eye.x + fx * Math.max(0.2, d - 1.2), eye.y + 0.4, eye.z + fz * Math.max(0.2, d - 1.2));
+      this._jsLight.intensity = (caught ? 7 : 5) * (0.75 + Math.random() * 0.25);
+    }
+    return { yaw: camYaw, pitch: camPitch };
+  }
+
   render(state, eye, yaw, pitch, dt = 0) {
     if (this._ctxLost) return;
     this._dt = dt || 0.016;
@@ -1656,6 +1775,7 @@ export class Renderer {
     state.monsters.forEach((mon, i) => {
       const mesh = this.monsterMeshes[i];
       if (!mesh) return;
+      if (this._js && this._js.mesh === mesh) return;
       mesh.visible = mon.active !== false && !mon.hideFromSelf;
       if (!mesh.visible) return;
       mesh.position.set(mon.position.x, mon.position.y || 0, mon.position.z);
