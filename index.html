@@ -43,6 +43,8 @@ window.addEventListener('error', function (e) {
     }
   }
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
 <body class="horror-theme">
   <div id="rotate-hint" aria-live="polite">
@@ -167,9 +169,10 @@ window.addEventListener('error', function (e) {
       <div id="lightning-flash" class="hidden" style="position:fixed;inset:0;background:#fff;opacity:0.85;pointer-events:none;z-index:9998"></div>
     <div id="jumpscare-overlay" class="hidden" aria-hidden="true"></div>
       <div id="hud" class="hidden">
-        <button id="btn-hud-menu" class="btn" type="button" style="position:absolute;top:.5rem;right:3.2rem;min-width:0;padding:.4rem .7rem">☰</button>
-<button id="btn-hud-settings" class="btn" type="button"
-          style="position:absolute;top:.5rem;right:.5rem;min-width:0;padding:.4rem .7rem;z-index:30">⚙</button>
+        <div id="hud-actions">
+          <button id="btn-hud-menu" type="button" aria-label="Jeda">☰</button>
+          <button id="btn-hud-settings" type="button" aria-label="Pengaturan">⚙</button>
+        </div>
         <div id="vitals" aria-label="Status karakter">
           <div class="vital"><span class="v-ico">⚡</span><span class="v-lbl">Stamina</span><div id="stamina-bar" class="v-track"><div id="stamina-fill"></div></div></div>
           <div class="vital"><span class="v-ico">❤</span><span class="v-lbl">Nyawa</span><div id="health-bar" class="v-track"><div id="health-fill"></div></div></div>
@@ -178,20 +181,20 @@ window.addEventListener('error', function (e) {
           <div class="vital"><span class="v-ico">🔋</span><span class="v-lbl">Baterai</span><div id="battery-bar" class="v-track" title="Baterai senter"><div id="battery-fill"></div></div></div>
           <div class="vital"><span class="v-ico">🧠</span><span class="v-lbl">Waras</span><div id="sanity-bar" class="v-track" title="Sanity"><div id="sanity-fill"></div></div></div>
         </div>
-        <div id="bag-hud" style="position:absolute;top:2.2rem;right:1rem;text-align:right;white-space:pre;font-size:.8rem;color:#cdb;text-shadow:0 0 4px #000"></div>
+        <div id="bag-hud"></div>
         <div id="bag-panel" class="hidden"></div>
-        <div id="battery-bar" title="Battery"><div id="battery-fill"></div></div>
-        <p id="battery-warn" class="hidden" style="position:fixed;bottom:18%;left:50%;transform:translateX(-50%);color:#fc6;font-size:.85rem;text-shadow:0 0 6px #000">Baterai habis — cari battery</p>
-        <div id="sanity-bar" title="Sanity"><div id="sanity-fill"></div></div>
+        <p id="battery-warn" class="hidden">Baterai habis — cari battery</p>
         <p id="whisper-caption" class="hidden" aria-hidden="true">…did you hear that?</p>
         <div id="suspicion-indicator"></div>
         <div id="crosshair">+</div>
         <div id="heart-rate"><span id="heart-icon">♥</span> <span id="heart-bpm">70</span> BPM</div>
         <div id="monster-dist"></div>
-        <div id="match-timer">Hari 1</div>
-        <div id="phase-label">SORE</div>
+        <div id="hud-info">
+          <div id="match-timer">Hari 1</div>
+          <div id="phase-label">SORE</div>
+          <div id="weather-label"></div>
+        </div>
         <div id="location-hint" class="hidden"></div>
-        <div id="weather-label"></div>
         <div id="revive-bar" class="hidden"></div>
         <div id="status-pills">
           <span id="pill-hide" class="pill hidden">HIDE</span>
@@ -275,7 +278,7 @@ window.addEventListener('error', function (e) {
     <button id="bb-close" class="btn" type="button">Close</button>
     <p id="bb-status" class="subtitle"></p>
   </div>
-  <script type="module" src="./js/main.js?v=8.0"></script>
+  <script type="module" src="./js/main.js?v=8.2.1"></script>
 <div id="toast" class="hidden" style="position:fixed;bottom:12%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#eee;padding:.6rem 1.2rem;border-radius:6px;z-index:10000;font-size:.9rem;max-width:90%;text-align:center"></div>
 
   <div id="pause-overlay" class="screen hidden" style="z-index:55;background:rgba(0,0,0,.72)">

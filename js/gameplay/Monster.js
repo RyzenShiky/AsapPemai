@@ -432,8 +432,11 @@ export class MonsterController {
     if (!canAttack) return;
     const targets = [];
     const local = this.state.data.player;
-    if (local && local.alive !== false) {
+    const monUid = this.state._pickMonsterUid || null;
+    // Skip the player who is the Pick-One monster (position is shared with the AI body)
+    if (local && local.alive !== false && !(monUid && this.room && monUid === this.room.uid)) {
       targets.push({
+        uid: this.room?.uid || 'me',
         pos: local.position,
         apply: (dmg) => {
           if (local.isDowned) {
@@ -459,7 +462,9 @@ export class MonsterController {
     if (this.room?.isHost && this.room.remotePlayers) {
       for (const [uid, rp] of Object.entries(this.room.remotePlayers)) {
         if (uid === this.room.uid || rp.alive === false) continue;
+        if (monUid && uid === monUid) continue;
         targets.push({
+          uid,
           pos: { x: rp.x, z: rp.z },
           apply: (dmg) => this.room.applyDamage(uid, dmg),
         });

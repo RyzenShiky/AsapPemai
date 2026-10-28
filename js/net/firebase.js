@@ -124,6 +124,7 @@ export class MultiplayerRoom {
     this.remoteSounds = [];
     this.remoteVehicles = {};
     this.remotePickups = {};
+    this.remoteRevives = {};
     this.remoteClaims = {};
     this.remoteBillboard = null;
     this.gameStatus = { gameOver: false, win: false };
@@ -243,6 +244,7 @@ export class MultiplayerRoom {
       this.remoteMission = v.mission || null;
       this.remoteMissionActs = v.missionActs || {};
       this.remotePick = v.pick || null;
+      this.remoteRevives = v.revives || {};
       this.remotePickChoice = v.pickChoice || {};
       this.remotePickAct = v.pickAct || {};
       this.remoteClaims = v.pickupClaims || {};
@@ -461,6 +463,16 @@ export class MultiplayerRoom {
     });
   }
 
+  /** Non-host: write a revive request. Host: apply immediately. */
+  requestRevive(uid) {
+    if (!uid || uid === this.uid) return Promise.resolve();
+    if (this.isHost) return this.revivePlayer(uid);
+    return set(ref(this.db, `rooms/${this.code}/revives/${uid}`), {
+      by: this.uid,
+      t: Date.now(),
+    });
+  }
+
   revivePlayer(uid) {
     const prev = this.remotePlayers[uid];
     if (!prev) return Promise.resolve();
@@ -469,7 +481,22 @@ export class MultiplayerRoom {
       health: 40,
       alive: true,
       downedTimer: 0,
-    });
+    }).then(() => remove(ref(this.db, `rooms/${this.code}/revives/${uid}`)).catch(() => {}));
+  }
+
+  /** Host: apply pending revive requests written by clients. */
+  processRevives() {
+    if (!this.isHost) return;
+    const rev = this.remoteRevives || {};
+    for (const [uid, req] of Object.entries(rev)) {
+      if (!req || !this.remotePlayers[uid]) continue;
+      const rp = this.remotePlayers[uid];
+      if (rp.isDowned === false && (rp.health || 0) > 0) {
+        remove(ref(this.db, `rooms/${this.code}/revives/${uid}`)).catch(() => {});
+        continue;
+      }
+      this.revivePlayer(uid);
+    }
   }
 
   /** Per-vehicle write: driver or host (host won't overwrite another driver's vehicle). */

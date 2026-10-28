@@ -50,7 +50,7 @@ let heartAcc = 0;
 let lastNearDist = Infinity;
 let sanity = new SanityManager();
 let jumpscare = new JumpscareManager();
-let caughtStarted = false;
+let caughtStarted = false, caughtActive = false, caughtAt = 0;
 let pacing = new PacingDirector();
 let dread = null;
 let vehicleControllers = [];
@@ -386,7 +386,7 @@ async function setupLocalGame(fromSave = false) {
   appliedPickups.clear();
   sanity = new SanityManager();
   jumpscare = new JumpscareManager();
-  caughtStarted = false;
+  caughtStarted = false; caughtActive = false; caughtAt = 0;
   if (state) state._audio = audio;
   renderer?._endJumpscare?.();
   pacing = new PacingDirector();
@@ -1142,6 +1142,13 @@ function wireUI(canvas) {
   document.getElementById('btn-start-multi').addEventListener('click', async () => {
     if (!room || !room.isHost) return;
     try {
+      if (room.meta?.mode === 'pickone') {
+        const n = Object.keys(room.remotePlayers || {}).length;
+        if (n < 3) {
+          alert(`Pick One butuh minimal 3 pemain (sekarang ${n}).`);
+          return;
+        }
+      }
       await room.setStarted(true);
       await beginMultiGame();
     } catch (e) {
@@ -1167,7 +1174,7 @@ function wireUI(canvas) {
       if (touch && inputMode() === 'touch') touch.show();
       document.getElementById('game-canvas')?.focus();
       deadShown = false;
-      caughtStarted = false;
+      caughtStarted = false; caughtActive = false; caughtAt = 0;
       renderer?._endJumpscare?.();
       startLoop();
       return;
@@ -1259,13 +1266,22 @@ function showGameOver(win, keepRunning = false) {
   if (state) state._lastRaining = false;
   document.getElementById('hud').classList.add('hidden');
   document.getElementById('gameover-screen').classList.remove('hidden');
-  document.getElementById('go-title').textContent = win ? 'YOU ESCAPED' : 'YOU DIED';
+  let title = win ? 'YOU ESCAPED' : 'YOU DIED';
+  let sub = null;
+  if (pickOne?.pk?.phase === 'over' && pickOne.pk.text) {
+    title = pickOne.pk.text;
+  } else if (pickOne?.isMonster?.()) {
+    title = win ? 'HUNT COMPLETE' : 'SURVIVORS ESCAPED';
+  } else if (pickOne && !win) {
+    title = 'YOU WERE CAUGHT';
+  }
+  document.getElementById('go-title').textContent = title;
   const days = state?.data?.world?.daysSurvived || state?.data?.progress?.daysReached || 0;
-  document.getElementById('go-sub').textContent = win
+  document.getElementById('go-sub').textContent = sub || (win
     ? (state?.data?.progress?.timeUp
         ? `Bertahan ${days} hari — kamu selamat.`
         : `Survived the forest (${days} hari).`)
-    : `The forest claimed another soul. (${days} hari)`;
+    : `The forest claimed another soul. (${days} hari)`);
   if (mode === 'solo') {
     GameState.clearSave();
     refreshContinueBtn();
@@ -1354,6 +1370,26 @@ function tickJumpscare(dt, nearestMonsterDistVal, nearestMonsterState) {
     playerAlive: state ? state.data.player.alive : false,
   });
   if (kind) showJumpscare(kind);
+}
+
+function startCaught() {
+  if (caughtStarted) return;
+  caughtStarted = true;
+  caughtAt = performance.now();
+  const idx = nearestMonsterIndex(30);
+  caughtActive = idx >= 0 && !!renderer?.startJumpscare({ kind: 'caught', monsterIndex: idx, duration: 1.9 });
+  if (!caughtActive) return;
+  audio.playJumpscareStinger(); flashOverlay('caught'); shake();
+  hideTouch();
+  document.getElementById('hud')?.classList.add('hidden');
+}
+
+function tickCaught() {
+  if (!caughtActive) return false;
+  const done = performance.now() - caughtAt > 2800
+    || !renderer?.isJumpscareActive?.() || renderer.jumpscareDone();
+  if (done) caughtActive = false;
+  return !done;
 }
 
 function nearestMonsterIndex(maxDist = Infinity) {
@@ -1522,6 +1558,7 @@ function startLoop() {
     if (!used) tryVehicleInteract();
     tickDoorBash(dt);
     pickOne?.tick(dt);
+    if (room?.isHost) room.processRevives?.();
     if (cctv.on) {
       const pl = state.data.player;
       if (pl.health < cctv.hp - 0.5 || pl.isDowned) cctv.exit();
@@ -1607,7 +1644,7 @@ function startLoop() {
     }
 
     if (isAuthority) {
-      for (const m of monsters) {
+      if (!state.data.progress.gameOver) for (const m of monsters) {
         m._pacingOk = pacing.canTriggerEvent(now);
         m._onGhostEvent = () => {
           if (pacing.canTriggerEvent(now)) {
@@ -1662,24 +1699,30 @@ function startLoop() {
       const allDead = others.length === 0 || others.every(([, p]) => p.alive === false);
       if (allDead) { state.data.progress.gameOver = true; state.data.progress.win = false; }
     }
-    if (room?.isHost && !state.data.player.alive && !state.data.progress.gameOver && !deadShown) {
+    // Mati tapi match lanjut (host / Pick One): jumpscare dulu, baru overlay
+    if ((room?.isHost || (pickOne && room)) && !state.data.player.alive
+        && !state.data.progress.gameOver && !deadShown) {
+      startCaught();
+      if (tickCaught()) {
+        const pl = state.data.player;
+        renderer.render(state.data, player.eyePosition, pl.rotation.yaw, pl.rotation.pitch, dt);
+        return;
+      }
+      renderer?._endJumpscare?.(); hideJumpscare();
       deadShown = true;
       showGameOver(false, true);
     }
+
     if (state.data.progress.gameOver) {
-      if (!state.data.progress.win && !room) {
-        if (!caughtStarted) {
-          const idx = nearestMonsterIndex(18);
-          caughtStarted = idx >= 0 &&
-            !!renderer?.startJumpscare({ kind: 'caught', monsterIndex: idx, duration: 1.9 });
-          if (caughtStarted) { audio.playJumpscareStinger(); flashOverlay('caught'); shake(); }
-        }
-        if (caughtStarted && renderer?.isJumpscareActive?.() && !renderer.jumpscareDone()) {
+      if (!state.data.progress.win && !state.data.player.alive) {
+        startCaught();
+        if (tickCaught()) {
           const pl = state.data.player;
           renderer.render(state.data, player.eyePosition, pl.rotation.yaw, pl.rotation.pitch, dt);
           return;
         }
       }
+      hideJumpscare();
       showGameOver(state.data.progress.win);
       if (room && room.isHost) room.writeGame(state.data.progress, state.data.world.weather);
       return;
@@ -1755,6 +1798,7 @@ function startLoop() {
         renderer.syncRemotePlayer(uid, {
           ...p,
           name: p.name || profile.displayName,
+          isPickMonster: !!(state._pickMonsterUid && uid === state._pickMonsterUid),
         }, room.uid);
       }
       renderer.pruneRemotePlayers(active);
@@ -1997,7 +2041,7 @@ function startLoop() {
         }
         if (player._reviveAcc >= 3) {
           player._reviveAcc = 0;
-          room.revivePlayer(nearDowned);
+          room.requestRevive(nearDowned);
           // Host self-sync if somehow - N/A for other
         }
       } else {

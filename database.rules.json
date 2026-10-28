@@ -70,6 +70,13 @@
           ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid",
           ".validate": "newData.hasChildren(['v','step','rev'])"
         },
+        
+        "revives": {
+          "$uid": {
+            ".write": "auth != null",
+            ".validate": "newData.hasChildren(['by','t']) && newData.child('by').isString() && newData.child('t').isNumber()"
+          }
+        },
         "missionActs": {
           "$uid": {
             ".write": "auth != null && auth.uid === $uid",

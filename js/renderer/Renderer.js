@@ -169,9 +169,13 @@ export class Renderer {
       this.monsterAnimations = [];
     }
     try {
-      const plGltf = await loader.loadAsync('./assets/player.glb');
-      this.playerTemplate = plGltf.scene;
-      this.playerAnimations = plGltf.animations || [];
+      let plGltf;
+      try { plGltf = await loader.loadAsync('./assets/survivor.glb'); }
+      catch (_) { plGltf = await loader.loadAsync('./assets/player.glb'); }
+      this.playerTemplate = this._prepareSurvivor(plGltf.scene);
+      this.playerAnimations = (plGltf.animations && plGltf.animations.length)
+        ? plGltf.animations
+        : this._buildSurvivorClips(this.playerTemplate);
       try {
         const motorGltf = await loader.loadAsync('./assets/motor.glb');
         this.vehicleModels.motor = motorGltf.scene;
@@ -500,6 +504,115 @@ export class Renderer {
     return g;
   }
 
+
+
+  /** Scale to 1.8 m, feet on y=0, wrap so sync does not overwrite scale. */
+  _prepareSurvivor(model) {
+    model.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(model, true);
+    const h = box.getSize(new THREE.Vector3()).y;
+    if (h > 0.01) model.scale.multiplyScalar(1.8 / h);
+    model.updateMatrixWorld(true);
+    box.setFromObject(model, true);
+    model.position.y -= box.min.y;
+    model.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
+    const wrap = new THREE.Group();
+    wrap.add(model);
+    wrap.updateMatrixWorld(true);
+    return wrap;
+  }
+
+  _rigQ(r, x = 0, y = 0, z = 0) {
+    const e = (this._rigE ||= new THREE.Euler());
+    const q = (this._rigT ||= new THREE.Quaternion());
+    q.setFromEuler(e.set(x, y, z, 'YXZ'));
+    return new THREE.Quaternion().copy(r.Pinv).multiply(q).multiply(r.P).multiply(r.q0);
+  }
+
+  _buildSurvivorClips(root) {
+    const strip = (n) => n.replace(/_\d+$/, '');
+    const rig = {};
+    root.updateMatrixWorld(true);
+    root.traverse((o) => {
+      if (!o.isBone) return;
+      const P = new THREE.Quaternion();
+      if (o.parent) o.parent.getWorldQuaternion(P);
+      rig[strip(o.name)] = { name: o.name, q0: o.quaternion.clone(), p0: o.position.clone(), P, Pinv: P.clone().invert() };
+    });
+    this.playerRig = rig;
+    if (!rig.Hips || !rig.LeftUpLeg || !rig.RightUpLeg) return [];
+    const S = Math.sin, C = Math.cos, PI = Math.PI;
+    const gait = (A) => (ph) => {
+      const o = { _y: A.y(ph) };
+      for (const [side, p, sg] of [['Left', ph, 1], ['Right', ph + PI, -1]]) {
+        const th = -A.thigh * S(p);
+        const kn = A.knee * Math.max(0, C(p)) + 0.05;
+        o[side + 'UpLeg'] = [th, 0, 0];
+        o[side + 'Leg'] = [kn, 0, 0];
+        o[side + 'Foot'] = [-(th + kn) * 0.6, 0, 0];
+        o[side + 'Arm'] = [A.arm * S(p), 0, -sg * 0.25];
+        o[side + 'ForeArm'] = [-A.elbow, 0, 0];
+      }
+      o.Hips = [0, 0.08 * S(ph), 0];
+      o.Spine = [A.lean * 0.5, -0.1 * S(ph), 0];
+      o.Spine1 = [A.lean * 0.5, 0, 0];
+      o.Head = [-A.lean * 0.8, 0, 0];
+      return o;
+    };
+    const defs = {
+      Idle: { T: 3.2, n: 16, f: (ph) => ({
+        _y: 0.004 * S(ph),
+        Spine: [0.015 * S(ph), 0, 0], Spine2: [0.02 * S(ph + 0.6), 0, 0],
+        Head: [-0.015 * S(ph + 0.6), 0.04 * S(ph), 0],
+        LeftArm: [0.03 * S(ph), 0, -0.18], RightArm: [0.03 * S(ph + 0.5), 0, 0.18],
+        LeftForeArm: [-0.12, 0, 0], RightForeArm: [-0.12, 0, 0],
+      }) },
+      Walk: { T: 1.0, n: 24, f: gait({ thigh: 0.5, knee: 0.8, arm: 0.45, elbow: 0.35, lean: 0.06, y: (ph) => -0.07 * Math.abs(S(ph)) }) },
+      Run:  { T: 0.8, n: 24, f: gait({ thigh: 0.8, knee: 1.5, arm: 0.85, elbow: 1.3, lean: 0.22, y: (ph) => -0.11 * Math.abs(S(ph)) }) },
+    };
+    const clips = [];
+    for (const [name, d] of Object.entries(defs)) {
+      const times = [], vals = {}, last = {}, hipsY = [];
+      for (let i = 0; i <= d.n; i++) {
+        const pose = d.f((i / d.n) * PI * 2);
+        times.push((i / d.n) * d.T);
+        hipsY.push(rig.Hips.p0.y + pose._y);
+        for (const [k, a] of Object.entries(pose)) {
+          if (k === '_y' || !rig[k]) continue;
+          const q = this._rigQ(rig[k], a[0], a[1], a[2]);
+          if (last[k] && last[k].dot(q) < 0) { q.x = -q.x; q.y = -q.y; q.z = -q.z; q.w = -q.w; }
+          last[k] = q;
+          (vals[k] ||= []).push(q.x, q.y, q.z, q.w);
+        }
+      }
+      const tracks = Object.entries(vals).map(([k, v]) =>
+        new THREE.QuaternionKeyframeTrack(rig[k].name + '.quaternion', times, v));
+      const hv = [];
+      hipsY.forEach((y) => hv.push(rig.Hips.p0.x, y, rig.Hips.p0.z));
+      tracks.push(new THREE.VectorKeyframeTrack(rig.Hips.name + '.position', times, hv));
+      clips.push(new THREE.AnimationClip(name, d.T, tracks));
+    }
+    return clips;
+  }
+
+  _applySitPose(mesh) {
+    const rig = this.playerRig;
+    if (!rig) return;
+    const bones = (mesh.userData.bones ||= (() => {
+      const m = {};
+      mesh.traverse((o) => { if (o.isBone) m[o.name.replace(/_\d+$/, '')] = o; });
+      return m;
+    })());
+    const set = (k, x, y = 0, z = 0) => { if (rig[k] && bones[k]) bones[k].quaternion.copy(this._rigQ(rig[k], x, y, z)); };
+    for (const side of ['Left', 'Right']) {
+      const sg = side === 'Left' ? 1 : -1;
+      set(side + 'UpLeg', -1.35, 0, -sg * 0.08);
+      set(side + 'Leg', 1.3);
+      set(side + 'Arm', -0.9, 0, -sg * 0.2);
+      set(side + 'ForeArm', -0.5);
+    }
+    set('Spine', 0.2);
+  }
 
   _fallbackPlayer() {
     const g = new THREE.Group();
@@ -1510,7 +1623,7 @@ export class Renderer {
     const ty = (data.yaw || 0) + Math.PI;
     let dy = ((ty - mesh.rotation.y + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
     mesh.rotation.y += dy * k;
-    mesh.visible = data.alive !== false;
+    mesh.visible = data.alive !== false && !data.isPickMonster;
     // crawl: flatten
     if (data.moveState === 'crawl' || data.isDowned) mesh.rotation.x += (Math.PI / 2.2 - mesh.rotation.x) * k;
     else mesh.rotation.x += (0 - mesh.rotation.x) * k;
@@ -1525,7 +1638,8 @@ export class Renderer {
       const sp = u.lastPos ? u.lastPos.distanceTo(mesh.position) / Math.max(this._dt || 0.016, 0.001) : 0;
       (u.lastPos ||= new THREE.Vector3()).copy(mesh.position);
       const a = u.anim?.actions?.[u.anim.current];
-      if (a) a.timeScale = u.anim.current === 'Run' ? sp / 5.5 : u.anim.current === 'Walk' ? sp / 2.8 : 1;
+      if (a) a.timeScale = u.anim.current === 'Run' ? Math.min(1.8, Math.max(0.6, (typeof sp === 'number' ? sp : 2.8) / 5.5))
+      : u.anim.current === 'Walk' ? Math.min(1.8, Math.max(0.6, (typeof sp === 'number' ? sp : 2.8) / 2.8)) : 1;
       u.sit = !!(data.moveState === 'riding' || data.ridingVehicleId);
     }
     const spr = this.nameSprites.get('p-' + uid);
@@ -1720,15 +1834,7 @@ export class Renderer {
     this._dt = dt || 0.016;
     for (const mixer of this.mixers) mixer.update(dt || 0);
     for (const m of Object.values(this.remoteMeshes || {})) {
-      if (!m.userData.sit) continue;
-      const b = (n) => m.getObjectByName(n);
-      try {
-        if (b('thigh.L')) b('thigh.L').rotation.x = -1.35;
-        if (b('thigh.R')) b('thigh.R').rotation.x = -1.35;
-        if (b('shin.L')) b('shin.L').rotation.x = 1.3;
-        if (b('shin.R')) b('shin.R').rotation.x = 1.3;
-        if (b('spine')) b('spine').rotation.x = 0.2;
-      } catch (e) { /* */ }
+      if (m.userData.sit) this._applySitPose(m);
     }
     this.tickWorldFx(dt || 0);
     this.updateDoors(dt || 0);
@@ -1743,8 +1849,13 @@ export class Renderer {
 
     this.camera.position.set(eye.x, eye.y, eye.z);
     this.camera.rotation.order = 'YXZ';
-    this.camera.rotation.y = yaw;
-    this.camera.rotation.x = pitch;
+    let camYaw = yaw, camPitch = pitch;
+    if (this._js) {
+      const r = this._tickJumpscare(dt, eye, yaw, pitch);
+      if (r) { camYaw = r.yaw; camPitch = r.pitch; }
+    }
+    this.camera.rotation.y = camYaw;
+    this.camera.rotation.x = camPitch;
     if (this.cctv) {
       const c = this.cctv.cams[this.cctv.i];
       this.camera.position.set(c.x, c.y, c.z);

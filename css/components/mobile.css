@@ -155,3 +155,53 @@ body.is-landscape #app {
   visibility: visible;
   pointer-events: auto;
 }
+
+
+/* ---- v8.2 HUD / menu polish ---- */
+:root {
+  --ui-bg: rgba(10,9,11,.58); --ui-bg-strong: rgba(10,9,11,.84);
+  --ui-line: rgba(255,255,255,.10); --ui-line-hot: rgba(224,88,76,.7);
+  --ui-text: #ece6dc; --ui-dim: rgba(236,230,220,.58); --ui-accent: #d6453a; --ui-r: 10px;
+  --ui-x: max(12px, env(safe-area-inset-left)); --ui-xr: max(12px, env(safe-area-inset-right));
+  --ui-top: max(10px, env(safe-area-inset-top)); --ui-bot: max(14px, env(safe-area-inset-bottom));
+  --font-ui: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-title: Cinzel, "Trajan Pro", Georgia, serif;
+}
+body { font-family: var(--font-ui); }
+#hud { font-family: var(--font-ui); color: var(--ui-text); }
+#vitals, #hud-info, #mission-hud, #bag-panel {
+  background: linear-gradient(180deg, var(--ui-bg), rgba(10,9,11,.36));
+  border: 1px solid var(--ui-line); border-radius: var(--ui-r);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+#vitals { top: var(--ui-top); left: var(--ui-x); width: 172px; padding: 8px 10px; gap: 7px; }
+#vitals .v-lbl { display: none; }
+#vitals .v-track { height: 5px; border: 0; border-radius: 99px; background: rgba(255,255,255,.09); }
+#vitals .v-track > div { border-radius: 99px; }
+#vitals .vital:nth-child(2) .v-track { height: 9px; }
+#health-fill  { background: linear-gradient(90deg, #8d1d1d, #e04a3f); }
+#stamina-fill { background: linear-gradient(90deg, #3f8f63, #8fe0a8); }
+#hunger-fill  { background: linear-gradient(90deg, #8a6420, #e0b040); }
+#thirst-fill  { background: linear-gradient(90deg, #2f6d96, #6cb8e8); }
+#hud-actions { position: absolute; top: var(--ui-top); right: var(--ui-xr); z-index: 30; display: flex; gap: 6px; pointer-events: auto; }
+#hud-actions button {
+  width: 38px; height: 38px; display: grid; place-items: center; padding: 0; font-size: 16px; line-height: 1;
+  color: var(--ui-text); cursor: pointer; background: var(--ui-bg); border: 1px solid var(--ui-line); border-radius: 50%;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+#hud-info { position: absolute; top: calc(var(--ui-top) + 46px); right: var(--ui-xr);
+  display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding: 6px 10px; }
+#hud-info > * { position: static !important; top: auto !important; right: auto !important; text-shadow: none; }
+#match-timer { font-size: 15px; font-weight: 700; letter-spacing: .06em; }
+#phase-label { font-size: 10px; letter-spacing: .22em; color: var(--ui-dim); }
+#weather-label:empty { display: none; }
+#bag-hud { position: absolute; top: calc(var(--ui-top) + 118px); right: var(--ui-xr);
+  font-size: 12px; line-height: 1.5; text-align: right; white-space: pre; color: var(--ui-dim); text-shadow: 0 1px 3px #000; }
+#crosshair { width: 4px; height: 4px; border-radius: 50%; font-size: 0; background: rgba(255,255,255,.8); box-shadow: 0 0 0 1px rgba(0,0,0,.55); }
+#heart-rate { bottom: var(--ui-bot); padding: 4px 12px; border-radius: 99px; font-size: 12px;
+  background: var(--ui-bg); border: 1px solid var(--ui-line); }
+#battery-warn { position: fixed; bottom: 40%; left: 50%; transform: translateX(-50%); color: #ffcf6a;
+  font-size: .85rem; background: var(--ui-bg-strong); border: 1px solid var(--ui-line); border-radius: 99px; padding: .4rem 1rem; }
+#gameover-screen { animation: uiFadeIn .9s ease both; }
+@keyframes uiFadeIn { from { opacity: 0; } to { opacity: 1; } }
+#go-title { letter-spacing: .3em; color: #e0584c; text-shadow: 0 0 40px rgba(214,69,58,.5); }
