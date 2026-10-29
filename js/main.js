@@ -11,7 +11,7 @@ import { nearestMonsterDist, heartFromDistance } from './gameplay/Proximity.js';
 import { LANDMARKS } from './core/WorldConfig.js';
 import { DAY_SECONDS, MATCH_SECONDS, phaseFromProgress, lightingForProgress, randomMonsterSpawn } from './core/DayCycle.js';
 import { ITEMS, RECIPES, SHOP, MAX_SLOTS, MAX_WEIGHT, canCraft, canCarry, invWeight, rollLoot, sellPrice, addItem, removeItems, countOf, NO_SELL } from './gameplay/Items.js';
-import { Mission, Tutorial, Subtitles, MISSIONS, validateAnchors } from './gameplay/Mission.js';
+import { Mission, Tutorial, Subtitles, MISSIONS, validateAnchors, STORY, chapterByKey, nextChapter } from './gameplay/Mission.js';
 import { PickOne } from './gameplay/PickOne.js';
 import { isInsideBuilding } from './core/Buildings.js';
 import { SanityManager } from './gameplay/Sanity.js';
@@ -41,6 +41,7 @@ let renderer, player, monsters, audio, clock, state, colliders, touch;
 let running = false;
 let room = null;
 let mission = null, tutorial = null, subs = null, pickOne = null;
+let missionKey = 'world';
 let paused = false;
 let mode = 'solo';
 let netWriteAcc = 0;
@@ -402,6 +403,7 @@ async function setupLocalGame(fromSave = false) {
   pickOne?.dispose(); pickOne = null;
   const ch = new URLSearchParams(location.search).get('ch');
   const key = (ch && MISSIONS[ch]) ? ch : (level ? (level.def.mission || 'backrooms0') : 'world');
+  missionKey = key;
   const mDef = MISSIONS[key];
   subs = new Subtitles(document.getElementById('hud'));
   mission = new Mission(mDef, missionIO());
@@ -788,21 +790,45 @@ function tickDoorBash() {
 }
 
 const BIOME_MAPS = new Set();
+const currentCh = () => {
+  const c = new URLSearchParams(location.search).get('ch');
+  return c && MISSIONS[c] ? c : '';
+};
 const applyMapParam = (u, id) => {
-  u.searchParams.delete('level'); u.searchParams.delete('biome');
-  if (BIOME_MAPS.has(id)) u.searchParams.set('biome', id);
-  else if (id !== 'world') u.searchParams.set('level', id);
+  const [map, ch] = String(id).split(':');
+  u.searchParams.delete('level'); u.searchParams.delete('biome'); u.searchParams.delete('ch');
+  if (BIOME_MAPS.has(map)) u.searchParams.set('biome', map);
+  else if (map !== 'world') u.searchParams.set('level', map);
+  if (ch && MISSIONS[ch]) u.searchParams.set('ch', ch);
 };
 const currentMap = () => {
   const q = new URLSearchParams(location.search);
   if (BIOME_MAPS.has(q.get('biome'))) return q.get('biome');
   return (typeof LEVELS !== 'undefined' && LEVELS[q.get('level')]) ? q.get('level') : 'world';
 };
+const roomKey = () => { const c = currentCh(); return c ? `${currentMap()}:${c}` : currentMap(); };
+const curMissionKey = () =>
+  currentCh() || (typeof LEVELS !== 'undefined' && LEVELS[currentMap()]?.mission) || (currentMap() === 'world' ? 'world' : currentMap());
 function switchMap(id) {
   const u = new URL(location.href);
   applyMapParam(u, id);
   if (profile?.provider !== 'google') sessionStorage.setItem('autoGuest', '1');
   location.href = u.toString();
+}
+
+function wireChapterSelect() {
+  const sel = document.getElementById('chapter-select');
+  if (!sel) return;
+  const all = new URLSearchParams(location.search).has('unlock');
+  const done = (key) => { try { return !!localStorage.getItem(`asap_story_${MISSIONS[key].id}`); } catch (e) { return false; } };
+  sel.innerHTML = STORY.map((c, i) => {
+    const open = all || i === 0 || (STORY[i - 1] && done(STORY[i - 1].key));
+    const title = MISSIONS[c.key]?.title || c.key;
+    return `<option value="${c.map}:${c.key}"${open ? '' : ' disabled'}>Episode ${c.n}: ${title}${open ? '' : ' 🔒'}</option>`;
+  }).join('');
+  const cur = chapterByKey(curMissionKey());
+  if (cur) sel.value = `${cur.map}:${cur.key}`;
+  sel.addEventListener('change', () => switchMap(sel.value));
 }
 
 function wireUI(canvas) {
@@ -813,6 +839,7 @@ function wireUI(canvas) {
     ms.value = currentMap();
     ms.addEventListener('change', () => switchMap(ms.value));
   }
+  try { wireChapterSelect(); } catch (e) { console.warn('chapter-select', e); }
   // Login
   document.getElementById('btn-guest').addEventListener('click', async () => {
     const btn = document.getElementById('btn-guest');
@@ -1073,7 +1100,7 @@ function wireUI(canvas) {
       for (let i = 0; i < 3; i++) {
         try {
           room = new MultiplayerRoom(genRoomCode(), true);
-          room.level = currentMap();
+          room.level = roomKey();
       await room.create();
           break;
         } catch (e) {
@@ -1105,7 +1132,7 @@ function wireUI(canvas) {
     if (!code) return alert('Enter room code');
     try {
       room = new MultiplayerRoom(code, false);
-      room.level = currentMap();
+      room.level = roomKey();
       await room.join();
       const { ref, update } = await import('https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js');
       const { getDb } = await import('./net/firebase.js');
@@ -1115,7 +1142,8 @@ function wireUI(canvas) {
       enterLobby();
     } catch (e) {
       room = null;
-      if (e.mapMismatch && (e.mapMismatch === 'world' || BIOME_MAPS.has(e.mapMismatch) || (typeof LEVELS !== 'undefined' && LEVELS[e.mapMismatch])) && !sessionStorage.getItem('joinTried')) {
+      const mm = String(e.mapMismatch || '').split(':')[0];
+      if (e.mapMismatch && (mm === 'world' || BIOME_MAPS.has(mm) || (typeof LEVELS !== 'undefined' && LEVELS[mm])) && !sessionStorage.getItem('joinTried')) {
         sessionStorage.setItem('joinTried', '1');
         sessionStorage.setItem('pendingJoin', code);
         if (profile?.provider !== 'google') sessionStorage.setItem('autoGuest', '1');
@@ -1274,6 +1302,20 @@ function showGameOver(win, keepRunning = false) {
     title = win ? 'HUNT COMPLETE' : 'SURVIVORS ESCAPED';
   } else if (pickOne && !win) {
     title = 'YOU WERE CAUGHT';
+  }
+  const storyWin = win && state?.data?.world?.gameMode === 'story' && !pickOne;
+  const nx = storyWin ? nextChapter(missionKey) : null;
+  if (storyWin) {
+    const cur = chapterByKey(missionKey);
+    title = nx ? `EPISODE ${cur?.n ?? ''} SELESAI` : 'TAMAT';
+    sub = nx ? `Berikutnya: Episode ${nx.n} — ${MISSIONS[nx.key].title}`
+             : 'Keenam episode selesai. Kalian keluar dari Westwood.';
+  }
+  const nb = document.getElementById('btn-next-ep');
+  if (nb) {
+    nb.classList.toggle('hidden', !nx);
+    nb.dataset.target = nx ? `${nx.map}:${nx.key}` : '';
+    if (nx) nb.textContent = `Lanjut → Episode ${nx.n}: ${MISSIONS[nx.key].title}`;
   }
   document.getElementById('go-title').textContent = title;
   const days = state?.data?.world?.daysSurvived || state?.data?.progress?.daysReached || 0;

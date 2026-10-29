@@ -12,9 +12,17 @@ const DEFAULTS = {
   lighter: 'KeyG',
 };
 
+function loadBinds() {
+  try {
+    const raw = localStorage.getItem('longway_binds');
+    if (!raw) return {};
+    const o = JSON.parse(raw);
+    return o && typeof o === 'object' ? o : {};
+  } catch (e) { return {}; }
+}
 export const binds = {
   ...DEFAULTS,
-  ...JSON.parse(localStorage.getItem('longway_binds') || '{}'),
+  ...loadBinds(),
 };
 
 const save = () => { try { localStorage.setItem('longway_binds', JSON.stringify(binds)); } catch (e) { /* */ } };

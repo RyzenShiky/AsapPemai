@@ -86,7 +86,7 @@ export function updateMonsterState(current, ctx) {
 
     case 'CHASE':
       // Lost target → go to last known + extrapolated heading
-      if (sus < 30 && timeSinceHeard > 5 && !canSee) {
+      if (sus < 30 && timeSinceHeard > (ctx.fastTarget ? 12 : 5) && !canSee) {
         ctx.memory.lostAt = ctx.now;
         return 'LOST_TARGET';
       }
@@ -97,7 +97,7 @@ export function updateMonsterState(current, ctx) {
       // Head toward last seen / last heard position, not live player
       if (hasRecentSound) return 'INVESTIGATE';
       if (canSee && sus > 20) return 'CHASE';
-      return ctx.now - (ctx.memory.lostAt || 0) > 6 ? 'SEARCH' : current;
+      return ctx.now - (ctx.memory.lostAt || 0) > (ctx.fastTarget ? 14 : 6) ? 'SEARCH' : current;
 
     case 'AMBUSH':
       if (ctx.distToPlayer < 12 && canSee) return 'CHASE';

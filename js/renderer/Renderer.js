@@ -259,6 +259,12 @@ export class Renderer {
     const c = box.getCenter(new THREE.Vector3());
     model.position.set(-c.x, -box.min.y, -c.z);
     model.traverse((o) => {
+      if (type === 'siren' && o.isMesh) {
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach((mt) => {
+          if (mt) { mt.fog = false; mt.needsUpdate = true; }
+        });
+      }
+
       if (o.isMesh) {
         o.frustumCulled = false;
         o.castShadow = !!gfx.shadows;

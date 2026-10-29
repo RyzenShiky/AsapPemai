@@ -37,3 +37,12 @@ Prefer compressed GLBs (meshopt + webp). `monster.glb` removed (unused).
 - **The Boiled One: Horror Game - Boiled One** by [MG Rips](https://sketchfab.com/MG_GameRips) — [CC BY-NC 4.0](http://creativecommons.org/licenses/by-nc/4.0/) — [Sketchfab](https://sketchfab.com/3d-models/the-boiled-one-horror-game-boiled-one-64ce66c413fe4e5e92a48e8e02a83590)
 
 **Important:** Boiled One is **non-commercial**. Do not monetize (ads, paid donations, sales) while this model is in the game. Siren Head is a character by Trevor Henderson; Sketchfab CC does not remove character-IP risk. Prefer clearly original assets for a public/commercial release.
+
+
+## Security (pre-public)
+
+- Deploy rules after every change: `firebase deploy --only database,storage`
+- Enable **Firebase App Check** before wide release
+- Room codes are not a secret; rules now prefer membership for writes
+- See **CREDITS.md** for asset license risks (Boiled One NC, IP characters)
+- Compress GLBs (smily ~13MB, survivor ~6MB) before mobile release

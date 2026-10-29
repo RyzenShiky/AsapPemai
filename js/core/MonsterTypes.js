@@ -15,8 +15,8 @@ export const MONSTER_TYPES = {
     search: 'sweep', weak: 'silence', breach: 'smash',
   },
   siren: {
-    glb: 'siren.glb', h: 9.5, speed: 2.0, radius: 1.6, reach: 4.6, dmg: 60, nightAt: 0.5,
-    face: Math.PI, ignoresTrees: true, hearMul: 1.5, sense: { sightRange: 20, fov: 1.2, hear: 1.6 },
+    glb: 'siren.glb', h: 18, speed: 2.4, radius: 2.2, reach: 7.5, dmg: 60, nightAt: 0.5,
+    face: Math.PI, ignoresTrees: true, hearMul: 1.5, sense: { sightRange: 55, fov: 2.0, hear: 1.8 },
     search: 'sweep', weak: 'silence', breach: 'smash',
   },
   locust: {
@@ -30,6 +30,6 @@ export const ROSTER = ['shadow', 'smily', 'boiled', 'siren', 'locust'];
 export const MAX_PLAYERS = 6;
 
 export function applyBackroomsMonsters() {
-  Object.assign(MONSTER_TYPES.siren, { h: 2.7, radius: 0.5, reach: 1.9, speed: 2.3, ignoresTrees: false });
+  Object.assign(MONSTER_TYPES.siren, { h: 2.7, radius: 0.5, reach: 1.9, speed: 2.3, ignoresTrees: false, sense: { sightRange: 20, fov: 1.2, hear: 1.6 } });
   Object.assign(MONSTER_TYPES.locust, { h: 2.6, radius: 0.5, reach: 1.9, speed: 2.5 });
 }

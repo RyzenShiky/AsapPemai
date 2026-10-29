@@ -566,6 +566,16 @@ const pSplash = (audio, A, depth) => {
 
 registerLevel('backrooms37', {
   mission: 'pool',
+  pickups: () => {
+    const P = {}, C = CELL;
+    const put = (id, type, i, j) => { P[id] = { type, x: (i + 0.5) * C, z: (j + 0.5) * C, taken: false }; };
+    put('bat_a', 'battery', 6, 4);
+    put('bat_b', 'battery', -9, 10);
+    put('bat_c', 'battery', 12, -8);
+    put('wat_a', 'water', 0, -14);
+    put('med_a', 'medkit', -16, -6);
+    return P;
+  },
   fog: 0xbfe6e8, fogDensity: 0.024, humHz: 50, drain: 0.35, path: path37,
 
   setup(m) {

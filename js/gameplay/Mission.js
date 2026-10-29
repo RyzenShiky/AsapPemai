@@ -55,7 +55,8 @@ export const MISSIONS = {
         p3: ['Catatan panel 3: "Hari 6. Kalau kamu membaca ini, aku berhasil keluar. Ikuti dengung yang makin rendah."'],
       },
       ending: ['Cahaya fajar menembus pintu. Westwood, jalan yang sama, mobil yang sama.',
-        'Di dashboard ada catatan tulisan tangan Rani. Tanggalnya besok.'],
+        'Di dashboard ada catatan tulisan tangan Rani. Tanggalnya besok.',
+        'Episode 3 terbuka: Air yang Tidak Surut.'],
     },
     steps: [
       { id: 'panels', kind: 'activate', anchors: ['p1', 'p2', 'p3'], prompt: 'Aktifkan panel',
@@ -87,7 +88,8 @@ export const MISSIONS = {
         p3: ['Suar 3: dari puncak, seluruh gurun terlihat. Dan ada sesuatu yang bergerak di bawah sana.'],
       },
       ending: ['Cahaya terakhir padam di puncak. Di kejauhan, rotor helikopter penyelamat terdengar.',
-        'Di pasir dekat api unggun ada jejak kaki. Bukan milik kalian, dan arahnya menuju kamp.'],
+        'Di pasir dekat api unggun ada jejak kaki. Bukan milik kalian, dan arahnya menuju kamp.',
+        'Episode 5 terbuka: Suar Kedua.'],
     },
     steps: [
       { id: 'beacons', kind: 'activate', anchors: ['p1', 'p2', 'p3'], prompt: 'Nyalakan suar',
@@ -110,7 +112,7 @@ export const MISSIONS = {
                relay:  ['Pompa butuh daya. Pasang dua baterai di panel relay.'],
                exit:   ['Air mulai naik. Cari tangga keluar bersama-sama.'] },
       ending: ['Permukaan air membeku di anak tangga terakhir. Di atasnya, pasir.',
-               'Episode 4 terbuka: Suar Kedua.'],
+               'Episode 4 terbuka: Senja di Saqqara.'],
     },
     steps: [
       { id: 'valves', kind: 'activate', anchors: ['v1','v2','v3'], prompt: 'Putar katup',
@@ -131,11 +133,11 @@ export const MISSIONS = {
       exit: { x: 0, z: 8, r: 14, label: 'Titik evakuasi' },
     },
     story: {
-      intro: ['Pasir menggantikan air. Jejak kaki di kamp lama menuju kompleks Djoser.'],
+      intro: ['Jejak kaki di kamp lama menuju kompleks Djoser. Kali ini kalian tahu apa yang menunggu di balik pagar.'],
       start: { power: ['Isi dua baterai ke suar halaman utara.'],
                beacons: ['Nyalakan suar di Heb-Sed dan puncak piramida.'],
                exit: ['Semua suar menyala. Kembali ke kamp.'] },
-      ending: ['Di cahaya terakhir, jejak kaki itu berhenti di depan kalian. Episode 5: Besok Pagi.'],
+      ending: ['Di cahaya terakhir, jejak kaki itu berhenti di depan kalian. Episode 6 terbuka: Besok Pagi.'],
     },
     steps: [
       { id: 'power', kind: 'deposit', anchor: 'p2', item: 'battery', required: 2, prompt: 'Isi baterai',
@@ -171,6 +173,20 @@ export const MISSIONS = {
     ],
   },
 
+};
+
+export const STORY = [
+  { n: 1, key: 'world',      map: 'world' },
+  { n: 2, key: 'backrooms0', map: 'backrooms0' },
+  { n: 3, key: 'pool',       map: 'backrooms37' },
+  { n: 4, key: 'desert',     map: 'desert' },
+  { n: 5, key: 'desert2',    map: 'desert' },
+  { n: 6, key: 'finale',     map: 'world' },
+];
+export const chapterByKey = (key) => STORY.find((c) => c.key === key) || null;
+export const nextChapter = (key) => {
+  const i = STORY.findIndex((c) => c.key === key);
+  return i >= 0 ? STORY[i + 1] || null : null;
 };
 
 export function validateAnchors(def, from = { x: 5, z: 8 }) {
@@ -252,7 +268,7 @@ export class Mission {
   }
 
   _fresh() {
-    return { v: this.def.version, step: 0, count: 0, done: {}, contrib: {}, ack: {}, complete: false, story: !!this.io.story?.(), rev: Date.now() };
+    return { id: this.def.id, v: this.def.version, step: 0, count: 0, done: {}, contrib: {}, ack: {}, complete: false, story: !!this.io.story?.(), rev: Date.now() };
   }
   get active() { return this.io.isHost() ? this.io.enabled() : !!this.io.remote(); }
   step() { return this.def.steps[this.s.step] || null; }
@@ -296,7 +312,7 @@ export class Mission {
   _hostTick(dt) {
     if (!this._owned) {
       const r = this.io.remote();
-      if (r && r.v === this.def.version) this._adopt(r, false);
+      if (r && r.id === this.def.id && r.v === this.def.version) this._adopt(r, false);
       this._owned = true;
     }
     let changed = false;
@@ -310,7 +326,8 @@ export class Mission {
     this._gAcc += dt;
     if (!this.s.complete && this._gAcc >= 0.25) {
       this._gAcc = 0;
-      if (this._gatherDone()) { this.s.complete = true; changed = true; this._say(this.def.story?.ending); this.io.onComplete(); }
+      if (this._gatherDone()) { this.s.complete = true;
+      try { localStorage.setItem('asap_story_' + this.def.id, '1'); } catch (e) { /* */ }; changed = true; this._say(this.def.story?.ending); this.io.onComplete(); }
     }
     if (changed) this._commit();
   }
@@ -351,7 +368,7 @@ export class Mission {
 
   _clientTick() {
     const r = this.io.remote();
-    if (r && r.v === this.def.version && r.rev !== this.s.rev) this._adopt(r, true);
+    if (r && r.id === this.def.id && r.v === this.def.version && r.rev !== this.s.rev) this._adopt(r, true);
     if (!this.pending) return;
     const ack = this.s.ack[this.io.uid()];
     if (ack && ack.n === this.pending.n) {

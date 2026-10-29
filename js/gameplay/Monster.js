@@ -22,6 +22,8 @@ const BREACH = {
 const DOOR_REACH = 2.4;
 const DOOR_STANDOFF = 1.2;
 const STATE_SPEED = { INVESTIGATE: 1.3, SEARCH: 1, CHASE: 2, LOST_TARGET: 1.6, AMBUSH: 1.8 };
+const VEH_FAST = PLAYER_RUN * 1.35;
+const VEH_CAP = { shadow: 11.5, smily: 11.5, boiled: 12.5, siren: 13.5, locust: 12.5 };
 const SIGNATURE = {
   smily:  (m, p, d, facing) => (d < 35 && facing > 0.75 ? 0.1 : 1.3),
   boiled: (m, p) => ((p.noiseAge ?? 99) < 1.5 ? 1.35 : 1),
@@ -115,7 +117,7 @@ export class MonsterController {
       if (d < 16 && facing > 0.94) return 0.45;
     }
 
-    if (this.cfg.weak === 'silence' && (p.noiseAge ?? 99) > 4 && !m.memory.canSeePlayer) {
+    if (this.cfg.weak === 'silence' && !this._fast && (p.noiseAge ?? 99) > 4 && !m.memory.canSeePlayer) {
       const s = this.perception?.suspicion;
       if (s && typeof s.value === 'number') s.value = Math.max(0, s.value - 10 * dt);
     }
@@ -158,6 +160,20 @@ export class MonsterController {
     const tgt = this._pickTarget(m);
     const ppos = tgt.pos;
     const distP = Math.hypot(m.position.x - ppos.x, m.position.z - ppos.z);
+    {
+      const tp = this._tp;
+      if (!tp || tp.uid !== tgt.uid) this._tp = { uid: tgt.uid, x: ppos.x, z: ppos.z, t: now };
+      else if (now - tp.t >= 0.25) {
+        const k = now - tp.t;
+        const vx = (ppos.x - tp.x) / k, vz = (ppos.z - tp.z) / k;
+        const sp = Math.hypot(vx, vz);
+        this._tgtVel = { x: vx, z: vz };
+        if (sp < 40) this._tgtSpeed = sp;
+        this._tp = { uid: tgt.uid, x: ppos.x, z: ppos.z, t: now };
+      }
+      this._now = now;
+      this._fast = (this._tgtSpeed || 0) > VEH_FAST;
+    }
 
     // Vision ~5×/s: check ALL players
     this._visionAcc += dt;
@@ -173,6 +189,7 @@ export class MonsterController {
       for (const t of targets) {
         let range = t.hiding ? 7 : (sense.sightRange ?? 28);
         if (t.flash) range *= 1.25;
+          if (this._fast && t.uid === tgt.uid) range *= 1.7;
         if (!canSee(m, t.pos, this.colliders, { light, range, fov, lampSites })) continue;
         const d = Math.hypot(m.position.x - t.pos.x, m.position.z - t.pos.z);
         if (d < seenD) { seen = t; seenD = d; }
@@ -190,12 +207,14 @@ export class MonsterController {
       this.perception.suspicion.add((tgt.hiding ? 10 : 35 + 65 * near) * dt);
     }
 
+    if (this._fast && m.aiState === 'CHASE' && distP < 90) this.perception.suspicion.add(22 * dt);
     this.perception.update(m, events, now, dt, weatherMulClamped, {
       playerPos: ppos,
       distToPlayer: distP,
       pacingOk: this._pacingOk !== false,
       onGhostEvent: this._onGhostEvent,
       canSee: m.memory.canSeePlayer,
+      fastTarget: this._fast && distP < 90,
     });
 
     const frenzy = this._frenzyMul(m) * this._weakMul(m, dt);
@@ -311,14 +330,23 @@ export class MonsterController {
       case 'SEARCH':
         return this.target || null;
       case 'CHASE':
-        return mem.canSeePlayer ? tgt.pos : (mem.lastSeenPosition ?? mem.lastHeardPosition ?? null);
+        return mem.canSeePlayer ? tgt.pos : (this._predict(mem) ?? mem.lastHeardPosition ?? null);
       case 'LOST_TARGET':
-        return mem.lastSeenPosition ?? mem.lastHeardPosition ?? null;
+        return this._predict(mem) ?? mem.lastHeardPosition ?? null;
       case 'AMBUSH':
         return distXZ(m.position, tgt.pos) < 14 ? tgt.pos : null;
       default:
         return null;
     }
+  }
+
+  _predict(mem) {
+    const p = mem.lastSeenPosition;
+    if (!p) return null;
+    const v = this._tgtVel;
+    if (!this._fast || !v) return p;
+    const age = Math.min(5, Math.max(0, (this._now || 0) - (mem.lastSeenTime || 0)));
+    return { x: p.x + v.x * age, y: p.y, z: p.z + v.z * age };
   }
 
   _blockingDoor(m, goal) {
@@ -357,7 +385,12 @@ export class MonsterController {
     let spd = base * (STATE_SPEED[s] ?? 1) * frenzy;
     if (s === 'CHASE' || s === 'LOST_TARGET') {
       const gap = distXZ(m.position, goal);
-      spd = Math.min(spd, PLAYER_RUN * (gap > 20 ? 1.2 : 1.06));
+      if (this._fast) {
+        const cap = VEH_CAP[ROSTER[this.index]] ?? 12;
+        spd = Math.min(cap, Math.max(spd, (this._tgtSpeed || 0) * 1.04 + Math.min(4, gap * 0.1)));
+      } else {
+        spd = Math.min(spd, PLAYER_RUN * (gap > 20 ? 1.2 : 1.06));
+      }
     }
     this.moveToward(m, door ? this._doorApproach(m, door) : goal, dt, spd);
   }
@@ -494,7 +527,7 @@ export class MonsterController {
     // Refresh local A* path every ~0.8 s when chasing/searching
     this._pathAcc = (this._pathAcc || 0) + dt;
     const exhausted = !this._path || this._pathIdx >= (this._path?.length || 0);
-    if (this._path === undefined || this._pathAcc > 0.8 || (exhausted && this._pathAcc > 0.25)) {
+    if (this._path === undefined || this._pathAcc > (this._fast ? 0.35 : 0.8) || (exhausted && this._pathAcc > 0.25)) {
       this._pathAcc = 0;
       this._path = findPath(this.colliders, m.position, target) || null;
       this._pathIdx = 0;

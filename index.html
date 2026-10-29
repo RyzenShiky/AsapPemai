@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="UTF-8" />
   <meta name="description" content="LONGWAY — game horor 3D multiplayer di browser.">
@@ -45,6 +45,19 @@ window.addEventListener('error', function (e) {
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <script>
+    window.addEventListener('error', function (e) {
+      if (!/[?&]debug\b/.test(location.search) || !e.message) return;
+      var el = document.getElementById('login-error');
+      if (el) { el.textContent = e.message; el.classList.remove('hidden'); }
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      if (!/[?&]debug\b/.test(location.search)) return;
+      var el = document.getElementById('login-error');
+      var m = (e.reason && (e.reason.message || e.reason)) || 'promise rejected';
+      if (el) { el.textContent = String(m); el.classList.remove('hidden'); }
+    });
+  </script>
 </head>
 <body class="horror-theme">
   <div id="rotate-hint" aria-live="polite">
@@ -101,7 +114,7 @@ window.addEventListener('error', function (e) {
         <p id="menu-player-name" class="subtitle"></p>
         <label class="mode-label">Mode
           <select id="game-mode">
-            <option value="story" selected>Cerita (Episode 1-2)</option>
+            <option value="story" selected>Cerita (Episode 1-6)</option>
             <option value="mission">Misi</option>
             <option value="endless">Tanpa akhir</option>
             <option value="days">Batas hari</option>
@@ -125,6 +138,9 @@ window.addEventListener('error', function (e) {
             <option value="desert">Desert — Kompleks Djoser</option>
           </select>
         </label></div>
+        <label class="mode-label" id="chapter-wrap">Episode (mode Cerita)
+          <select id="chapter-select"></select>
+        </label>
         <button id="btn-start" class="btn primary">Start Game</button>
         <button id="btn-continue" class="btn" disabled>Continue</button>
         <button id="btn-multi" class="btn">Multiplayer</button>
@@ -265,6 +281,7 @@ window.addEventListener('error', function (e) {
       <div id="gameover-screen" class="screen hidden">
         <h1 id="go-title">YOU DIED</h1>
         <p id="go-sub" class="subtitle"></p>
+        <button id="btn-next-ep" class="btn primary hidden" type="button">Lanjut</button>
         <button id="btn-restart" class="btn primary">Try Again</button>
         <button id="btn-menu" class="btn">Main Menu</button>
       </div>
@@ -278,7 +295,7 @@ window.addEventListener('error', function (e) {
     <button id="bb-close" class="btn" type="button">Close</button>
     <p id="bb-status" class="subtitle"></p>
   </div>
-  <script type="module" src="./js/main.js?v=8.2.1"></script>
+  <script type="module" src="./js/main.js?v=8.3.2"></script>
 <div id="toast" class="hidden" style="position:fixed;bottom:12%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#eee;padding:.6rem 1.2rem;border-radius:6px;z-index:10000;font-size:.9rem;max-width:90%;text-align:center"></div>
 
   <div id="pause-overlay" class="screen hidden" style="z-index:55;background:rgba(0,0,0,.72)">
