@@ -80,15 +80,15 @@ export function getStorageRef() {
 }
 
 export async function uploadBillboardMedia(file, roomCode) {
-  if (file.size > 8 * 1024 * 1024) throw new Error('File terlalu besar (maks 8 MB)');
-  const ok = /^(image\/|video\/mp4)/.test(file.type || '');
-  if (!ok) throw new Error('Tipe file tidak diizinkan');
-  const storage = getStorageRef();
-  const safe = (file.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
-  const path = `billboard/${roomCode || 'solo'}/${Date.now()}_${safe}`;
-  const fileRef = sRef(storage, path);
-  await uploadBytes(fileRef, file, { contentType: file.type });
-  return getDownloadURL(fileRef);
+  const { getStorage, ref: sref, uploadBytes, getDownloadURL } = await import('https://www.gstatic.com/firebasejs/11.0.0/firebase-storage.js');
+  const storage = getStorage();
+  const uid = (await ensureAuthUid(8000).catch(() => null)) || 'anon';
+  const safe = String(file.name || 'media').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 48);
+  const room = String(roomCode || 'solo').replace(/[^A-Za-z0-9_]/g, '').slice(0, 16) || 'solo';
+  const path = `billboard/${room}/${uid}/${Date.now()}_${safe}`;
+  const r = sref(storage, path);
+  await uploadBytes(r, file, { contentType: file.type || 'application/octet-stream' });
+  return getDownloadURL(r);
 }
 
 /** Local-only fallback id (solo / offline). Prefer ensureAuthUid for multiplayer. */

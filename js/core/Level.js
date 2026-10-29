@@ -710,10 +710,24 @@ registerLevel('backrooms37', {
 /* ====================== DESERT — KOMPLEKS PIRAMIDA DJOSER ====================== */
 const D_CH = 64, D_SEG = 24, D_FOG = 0xb98660;
 const DJ = { cx: 0, cz: -500, hx: 138.8, hz: 272.45, wt: 3, wh: 10.5, gate: [120, 129], col: 54 };
+const PK = 1.35;
 const PYR = {
   x: 0, z: -470, batter: 0.3,
-  tiers: [[60.5, 54.5, 11.6], [53.5, 47.9, 11.2], [46.5, 41.3, 10.7], [39.5, 34.7, 10.2], [32.5, 28.1, 9.7], [25.5, 21.5, 9.1]],
+  tiers: [[60.5, 54.5, 11.6], [53.5, 47.9, 11.2], [46.5, 41.3, 10.7], [39.5, 34.7, 10.2], [32.5, 28.1, 9.7], [25.5, 21.5, 9.1]]
+    .map(([a, b, c]) => [a * PK, b * PK, c * PK]),
 };
+const PYR_TOP = PYR.tiers.reduce((s, t) => s + t[2], 0);
+const RAMP = { x: 0, hw: 7, slope: 0.62 };
+RAMP.zTop = PYR.z + PYR.tiers[5][1] - PYR.tiers[5][2] * PYR.batter - 1;
+RAMP.z0 = RAMP.zTop + PYR_TOP / RAMP.slope;
+RAMP.zEnd = RAMP.zTop - 4;
+const rampH = (x, z) => (Math.abs(x - RAMP.x) > RAMP.hw || z > RAMP.z0 || z < RAMP.zEnd)
+  ? 0 : Math.min(PYR_TOP, (RAMP.z0 - z) * RAMP.slope);
+const rampFlat = (x, z) =>
+  (typeof smooth === 'function' ? smooth : (t) => t * t * (3 - 2 * t))(Math.min(1, Math.max(0, (RAMP.hw + 16 - Math.abs(x - RAMP.x)) / 12))) *
+  (typeof smooth === 'function' ? smooth : (t) => t * t * (3 - 2 * t))(Math.min(1, Math.max(0, (RAMP.z0 + 24 - z) / 16))) *
+  (typeof smooth === 'function' ? smooth : (t) => t * t * (3 - 2 * t))(Math.min(1, Math.max(0, (z - (PYR.z - PYR.tiers[0][1])) / 10)));
+
 const D_SUN = new THREE.Vector3(0.25, 0.2, -0.95).normalize();
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
 
@@ -748,8 +762,8 @@ const pyrH = (x, z) => {
   }
   return best;
 };
-const terrainH = (x, z) => dunes(x, z) * flatMask(x, z) + rubble(x, z);
-const floorH = (x, z) => Math.max(terrainH(x, z), pyrH(x, z));
+const terrainH = (x, z) => dunes(x, z) * flatMask(x, z) * (1 - (typeof rampFlat === "function" ? rampFlat(x, z) : 0)) + rubble(x, z);
+const floorH = (x, z) => Math.max(terrainH(x, z), pyrH(x, z), typeof rampH === "function" ? rampH(x, z) : 0);
 
 const inCx = (x, z, m = 0) => x > DJ.cx - DJ.hx - m && x < DJ.cx + DJ.hx + m && z > DJ.cz - DJ.hz - m && z < DJ.cz + DJ.hz + m;
 const dWx0 = DJ.cx - DJ.hx, dWx1 = DJ.cx + DJ.hx, dWz0 = DJ.cz - DJ.hz, dWz1 = DJ.cz + DJ.hz;
@@ -767,14 +781,25 @@ const D_COLS = [];
 for (let k = 0; k < 10; k++) for (const x of [DJ.gate[0] + 0.9, DJ.gate[1] - 0.9]) D_COLS.push({ x, z: dWz1 - 4.5 - k * 5.4 });
 const D_SHRINES = [];
 for (let k = 0; k < 11; k++) for (const x of [92, 118]) D_SHRINES.push({ x, z: -540 + k * 14 });
-const D_SERDAB = { x: 6, z: -534 };
+const D_SERDAB = { x: 6, z: -560 };
 const D_TENTS = [{ x: -9, z: 15 }, { x: 8, z: 17 }, { x: 11, z: 3 }, { x: -10, z: -3 }];
 const aabb = (a, b, c, d) => ({ type: 'wall', minX: a, maxX: b, minZ: c, maxZ: d });
+const PB = PYR.tiers[0], pX0 = PYR.x - PB[0], pX1 = PYR.x + PB[0], pZ0 = PYR.z - PB[1], pZ1 = PYR.z + PB[1];
+const D_PYR_WALLS = [
+  aabb(pX0 - 1.2, pX1 + 1.2, pZ0 - 1.2, pZ0),
+  aabb(pX0 - 1.2, pX0, pZ0, pZ1),
+  aabb(pX1, pX1 + 1.2, pZ0, pZ1),
+  aabb(pX0 - 1.2, RAMP.x - RAMP.hw, pZ1, pZ1 + 1.2),
+  aabb(RAMP.x + RAMP.hw, pX1 + 1.2, pZ1, pZ1 + 1.2),
+  aabb(RAMP.x - RAMP.hw - 0.8, RAMP.x - RAMP.hw, RAMP.zEnd, RAMP.z0),
+  aabb(RAMP.x + RAMP.hw, RAMP.x + RAMP.hw + 0.8, RAMP.zEnd, RAMP.z0),
+];
 const D_FIXED = [
   ...D_SLABS.map((s) => aabb(...s)), ...D_COLN_WALLS.map((s) => aabb(...s)),
   ...D_COLS.map((c) => ({ type: 'rock', x: c.x, z: c.z, r: 0.65 })),
   ...D_SHRINES.map((s) => aabb(s.x - 2.2, s.x + 2.2, s.z - 2.2, s.z + 2.2)),
   aabb(D_SERDAB.x - 1.6, D_SERDAB.x + 1.6, D_SERDAB.z - 1.6, D_SERDAB.z + 1.6),
+  ...D_PYR_WALLS,
   ...D_TENTS.map((t) => ({ type: 'rock', x: t.x, z: t.z, r: 2 })),
 ];
 const D_BLOCK = (x, z, m = 1) => D_FIXED.some((c) => (c.type === 'wall'
@@ -893,6 +918,13 @@ const pyramidGroup = () => {
     grp.add(m);
     y0 += th;
   });
+  const Lr = RAMP.z0 - RAMP.zEnd, Lt = RAMP.z0 - RAMP.zTop;
+  try {
+    const sh = new THREE.Shape([[0, -8], [0, 0], [Lt, PYR_TOP], [Lr, PYR_TOP], [Lr, -8]].map(([a, b]) => new THREE.Vector2(a, b)));
+    const rg = new THREE.ExtrudeGeometry(sh, { depth: RAMP.hw * 2, bevelEnabled: false });
+    rg.rotateY(Math.PI / 2); rg.translate(RAMP.x - RAMP.hw, 0, RAMP.z0);
+    grp.add(new THREE.Mesh(rg, mat));
+  } catch (e) { /* ramp mesh optional */ }
   return grp;
 };
 

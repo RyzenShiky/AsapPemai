@@ -1,4 +1,4 @@
-import { BUILDING_DEFS, DOORS, setDoor, camsFor } from './core/Buildings.js';
+import {BUILDING_DEFS, DOORS, setDoor, camsFor, WALLS, breakWall as breakWallCol, resetWalls} from './core/Buildings.js';
 import { GameState } from './core/GameState.js';
 import { Clock } from './core/Clock.js';
 import { buildColliders, buildSpatialGrid } from './core/Collision.js';
@@ -185,7 +185,7 @@ async function init() {
     const file = document.getElementById('bb-file')?.files?.[0];
     const st = document.getElementById('bb-status');
     if (!file) { if (st) st.textContent = 'Pilih file dulu'; return; }
-    if (file.size > 8 * 1024 * 1024) { if (st) st.textContent = 'Max 8MB'; return; }
+    if (file.size > 4 * 1024 * 1024) { if (st) st.textContent = 'Max 4MB'; return; }
     try {
       if (st) st.textContent = 'Uploading…';
       const code = room?.code || 'solo';
@@ -196,15 +196,25 @@ async function init() {
       const isVideo = file.type === 'video/mp4', isImage = file.type.startsWith('image/');
       if (!isVideo && !isImage) { if (st) st.textContent = 'Hanya gambar atau MP4'; return; }
       const type = isVideo ? 'video' : 'image';
-      const url = isVideo
-        ? (room ? await uploadBillboardMedia(file, code) : URL.createObjectURL(file))
-        : await imageToDataUrl(file);
-      if (room) await room.setBillboard(url, type);
-      else if (renderer) renderer.applyBillboardMedia({ url, type }, audio);
-      if (st) st.textContent = 'OK';
+      if (isVideo) {
+        if (!room) { if (st) st.textContent = 'Video billboard hanya di multiplayer + Storage'; return; }
+        try {
+          const url = await uploadBillboardMedia(file, code);
+          await room.setBillboard(url, 'video');
+          if (st) st.textContent = 'OK (video)';
+        } catch (e) {
+          if (st) st.textContent = 'Video gagal — Storage belum aktif / berbayar. Pakai gambar JPEG.';
+          throw e;
+        }
+      } else {
+        const url = await imageToDataUrl(file);
+        if (room) await room.setBillboard(url, 'image');
+        else if (renderer) renderer.applyBillboardMedia({ url, type: 'image' }, audio);
+        if (st) st.textContent = 'OK (gambar, tanpa Storage)';
+      }
     } catch (e) {
       console.error(e);
-      if (st) st.textContent = e.message || 'Upload gagal (cek Storage rules)';
+      if (st && !st.textContent.includes('Storage')) st.textContent = e.message || 'Upload gagal';
     }
   });
   {
@@ -307,6 +317,13 @@ async function setupLocalGame(fromSave = false) {
 
   const MONSTER_COUNT = ROSTER.length;
   state._level = level || null;
+  if (!resumed) { try { resetWalls(); } catch (e) { /* */ } renderer?.resetWalls?.(); }
+  state._wallFx = (c, dx, dz) => {
+    if (!breakWallCol(c)) return;
+    renderer?.breakWall(c.bid, c.side, c.i, dx, dz);
+    state._audio?.playCrashThud?.(1.5);
+    room?.writeDoorBroken?.(`wall:${c.bid}:${c.side}:${c.i}`);
+  };
   state._doorFx = (d, kind, dx, dz) => {
     if (kind === 'open') {
       setDoor(d, true);
@@ -557,6 +574,12 @@ function enterLobby() {
   if (room) {
     room.onChat = addChat;
     room.listenDoorsBroken?.((id) => {
+      if (String(id).startsWith('wall:')) {
+        const [, bid, side, i] = String(id).split(':');
+        const c = WALLS.find((w) => w.bid === bid && w.side === side && w.i === +i);
+        if (c && breakWallCol(c)) renderer?.breakWall(bid, side, +i, 0, 1);
+        return;
+      }
       const d = DOORS.find((x) => x.id === id);
       if (d) breakDoor(d, 0, 1, true);
     });

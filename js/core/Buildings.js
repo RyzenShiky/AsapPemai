@@ -3,6 +3,7 @@ export const DOOR_H = 2.3;
 const WALL_T = 0.35;
 
 /** Billboard facing road. */
+export const WALLS = [];
 export const DOORS = [];
 export const setDoor = (d, open) => { d.open = open; if (d.col) d.col.type = open ? 'door-open' : 'wall'; };
 
@@ -78,12 +79,34 @@ export function buildingWallColliders(def) {
   return walls.map((w) => ({ ...w, type: 'wall' }));
 }
 
+
+export function breakWall(c) {
+  if (!c || c.type !== 'wall' || !c.bid) return false;
+  c.type = 'broken';
+  const b = BUILDING_DEFS.find((x) => x.id === c.bid);
+  if (b) { b.breached = true; b.brokenWalls = (b.brokenWalls || 0) + 1; }
+  return true;
+}
+export function resetWalls() {
+  for (const c of WALLS) c.type = 'wall';
+  for (const b of BUILDING_DEFS) { b.breached = false; b.brokenWalls = 0; }
+}
+
 export function allBuildingColliders() {
   const out = [];
   DOORS.length = 0;
+  WALLS.length = 0;
   const WALL_T = 0.35;
   for (const def of BUILDING_DEFS) {
-    out.push(...buildingWallColliders(def));
+    const ws = buildingWallColliders(def);
+    let k = 0;
+    for (const s of ['n', 's', 'w', 'e']) {
+      const n = def.door === s ? 2 : 1;
+      for (let i = 0; i < n; i++, k++) {
+        if (ws[k]) Object.assign(ws[k], { bid: def.id, side: s, i });
+      }
+    }
+    out.push(...ws); WALLS.push(...ws);
     const { x, z, w, d, door } = def;
     const ns = door === 'n' || door === 's';
     const dx = door === 'e' ? w / 2 : door === 'w' ? -w / 2 : 0;

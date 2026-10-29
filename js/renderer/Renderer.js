@@ -958,6 +958,7 @@ export class Renderer {
 
 
   buildBuildings() {
+    this.wallMeshes = {}; this.roofMeshes = {}; this._falling = new Set();
     const doorW = 1.7;
     const wallT = 0.35;
     // Collect geometries by material key, then merge → few draw calls
@@ -989,34 +990,52 @@ export class Renderer {
 
       take('floor', floorMat, new THREE.BoxGeometry(w - 0.1, 0.12, d - 0.1), ox, 0.06, oz);
 
-      const wall = (ww, hh, dd, px, py, pz) =>
-        take(wk, wm, new THREE.BoxGeometry(ww, hh, dd), ox + px, py, oz + pz);
+      const cnt = {};
+      const wall = (ww, hh, dd, px, py, pz, side) => {
+        const k = `${def.id}:${side}`, i = (cnt[k] = (cnt[k] ?? -1) + 1);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(ww, hh, dd), wm);
+        m.position.set(ox + px, py, oz + pz); m.userData.home = m.position.clone();
+        m.castShadow = !!this.gfx?.shadows; m.receiveShadow = true;
+        this.buildingGroup.add(m); this.wallMeshes[`${k}:${i}`] = m;
+      };
 
       if (door === 'n') {
         const side = (w - doorW) / 2;
-        wall(side, h, wallT, -hx + side / 2, h / 2, -hz);
-        wall(side, h, wallT, hx - side / 2, h / 2, -hz);
-      } else wall(w + wallT, h, wallT, 0, h / 2, -hz);
+        wall(side, h, wallT, -hx + side / 2, h / 2, -hz, 'n');
+        wall(side, h, wallT, hx - side / 2, h / 2, -hz, 'n');
+      } else wall(w + wallT, h, wallT, 0, h / 2, -hz, 'n');
       if (door === 's') {
         const side = (w - doorW) / 2;
-        wall(side, h, wallT, -hx + side / 2, h / 2, hz);
-        wall(side, h, wallT, hx - side / 2, h / 2, hz);
-      } else wall(w + wallT, h, wallT, 0, h / 2, hz);
+        wall(side, h, wallT, -hx + side / 2, h / 2, hz, 's');
+        wall(side, h, wallT, hx - side / 2, h / 2, hz, 's');
+      } else wall(w + wallT, h, wallT, 0, h / 2, hz, 's');
       if (door === 'w') {
         const side = (d - doorW) / 2;
-        wall(wallT, h, side, -hx, h / 2, -hz + side / 2);
-        wall(wallT, h, side, -hx, h / 2, hz - side / 2);
-      } else wall(wallT, h, d + wallT, -hx, h / 2, 0);
+        wall(wallT, h, side, -hx, h / 2, -hz + side / 2, 'w');
+        wall(wallT, h, side, -hx, h / 2, hz - side / 2, 'w');
+      } else wall(wallT, h, d + wallT, -hx, h / 2, 0, 'w');
       if (door === 'e') {
         const side = (d - doorW) / 2;
-        wall(wallT, h, side, hx, h / 2, -hz + side / 2);
-        wall(wallT, h, side, hx, h / 2, hz - side / 2);
-      } else wall(wallT, h, d + wallT, hx, h / 2, 0);
+        wall(wallT, h, side, hx, h / 2, -hz + side / 2, 'e');
+        wall(wallT, h, side, hx, h / 2, hz - side / 2, 'e');
+      } else wall(wallT, h, d + wallT, hx, h / 2, 0, 'e');
 
+      {
+        const rm = new THREE.Mesh(
+          def.type === 'house'
+            ? new THREE.ConeGeometry(Math.max(w, d) * 0.72, h * 0.45, 4)
+            : new THREE.BoxGeometry(w + 0.4, 0.25, d + 0.4),
+          def.type === 'house' ? roofHouse : roofBld
+        );
+        if (def.type === 'house') { rm.rotation.y = Math.PI / 4; rm.position.set(ox, h + h * 0.2, oz); }
+        else rm.position.set(ox, h + 0.1, oz);
+        rm.userData.home = rm.position.clone();
+        this.buildingGroup.add(rm); this.roofMeshes[def.id] = rm;
+      }
       if (def.type === 'house') {
         const geo = new THREE.ConeGeometry(Math.max(w, d) * 0.72, h * 0.55, 4);
         geo.rotateY(Math.PI / 4);
-        take('roof_h', roofHouse, geo, ox, h + h * 0.2, oz);
+        // roof_h moved to mesh below
       } else {
         take('roof_b', roofBld, new THREE.BoxGeometry(w + 0.6, 0.25, d + 0.6), ox, h + 0.1, oz);
       }
@@ -1473,6 +1492,33 @@ export class Renderer {
     };
   }
 
+  breakWall(bid, side, i, dx = 0, dz = 1) {
+    const m = this.wallMeshes?.[`${bid}:${side}:${i}`];
+    if (!m || m.userData.fall) return;
+    m.userData.fall = { t: 0, vx: dx * 3, vz: dz * 3, rx: (Math.random() - 0.5) * 1.2, rz: (Math.random() - 0.5) * 1.2 };
+    this._falling.add(m);
+    const def = BUILDING_DEFS.find((b) => b.id === bid), r = this.roofMeshes?.[bid];
+    if (def?.brokenWalls >= 3 && r && !r.userData.fall) {
+      r.userData.fall = { t: 0, vx: 0, vz: 0, rx: 0.2, rz: 0.2 }; this._falling.add(r);
+    }
+  }
+  updateWalls(dt) {
+    for (const m of this._falling || []) {
+      const f = m.userData.fall; if (!f) continue; f.t += dt;
+      m.position.x += f.vx * dt; m.position.z += f.vz * dt;
+      m.position.y -= (2 + f.t * 6) * dt;
+      m.rotation.x += f.rx * dt; m.rotation.z += f.rz * dt;
+      if (f.t > 2.2) { m.visible = false; this._falling.delete(m); }
+    }
+  }
+  resetWalls() {
+    for (const m of [...Object.values(this.wallMeshes || {}), ...Object.values(this.roofMeshes || {})]) {
+      m.visible = true; m.userData.fall = null; m.rotation.set(0, 0, 0);
+      if (m.userData.home) m.position.copy(m.userData.home);
+    }
+    this._falling?.clear();
+  }
+
   updateDoors(dt) {
     for (const d of Object.values(this.doors || {})) {
       const p = d.pivot;
@@ -1818,7 +1864,8 @@ export class Renderer {
     mesh.position.set(eye.x + fx * d, 0, eye.z + fz * d);
     mesh.rotation.y = Math.atan2(-(eye.x - mesh.position.x), -(eye.z - mesh.position.z)) + (mesh.userData.face ?? Math.PI);
 
-    const wantPitch = Math.atan2(Math.min(h * 0.82, 3.4) - eye.y, d);
+    const aimY = h > 20 ? h * 0.3 : Math.min(h * 0.82, 3.4);
+    const wantPitch = Math.atan2(aimY - eye.y, d);
     camPitch = pitch + (wantPitch - pitch) * (caught ? ease(js.t / 0.22) : 0.6);
 
     const k = js.t / js.dur;
@@ -1844,6 +1891,7 @@ export class Renderer {
     }
     this.tickWorldFx(dt || 0);
     this.updateDoors(dt || 0);
+    this.updateWalls(dt || 0);
     // Hide local ridden vehicle (first-person); others still see it
     if (this.vehicleMeshes && state && state.player) {
       const rid = state.player.ridingVehicleId;
@@ -1859,6 +1907,15 @@ export class Renderer {
     if (this._js) {
       const r = this._tickJumpscare(dt, eye, yaw, pitch);
       if (r) { camYaw = r.yaw; camPitch = r.pitch; }
+    }
+    const rid = state?.player?.ridingVehicleId;
+    const vm = rid && !this.cctv && !this._js ? this.vehicleMeshes?.[rid] : null;
+    if (vm) {
+      const big = state.vehicles?.find((v) => v.id === rid)?.type !== 'motor';
+      const back = big ? 6.2 : 4.4, up = big ? 2.6 : 2.0;
+      const cx = vm.position.x + Math.sin(camYaw) * back, cz = vm.position.z + Math.cos(camYaw) * back;
+      this.camera.position.set(cx, Math.max(vm.position.y + up, groundHeight(cx, cz) + 1.2), cz);
+      camPitch = Math.max(-0.9, Math.min(0.5, camPitch - 0.12));
     }
     this.camera.rotation.y = camYaw;
     this.camera.rotation.x = camPitch;

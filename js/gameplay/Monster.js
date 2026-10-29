@@ -7,7 +7,7 @@ import { findPath } from '../ai/Pathfinding.js';
 import { inspectSpot } from './HideSpots.js';
 import { MONSTER_TYPES, ROSTER } from '../core/MonsterTypes.js';
 import { weatherVis } from '../core/Weather.js';
-import { DOORS, isInsideBuilding, setDoor } from '../core/Buildings.js';
+import { DOORS, WALLS, isInsideBuilding, setDoor } from '../core/Buildings.js';
 
 function distXZ(a, b) {
   return Math.hypot(a.x - b.x, a.z - b.z);
@@ -23,7 +23,7 @@ const DOOR_REACH = 2.4;
 const DOOR_STANDOFF = 1.2;
 const STATE_SPEED = { INVESTIGATE: 1.3, SEARCH: 1, CHASE: 2, LOST_TARGET: 1.6, AMBUSH: 1.8 };
 const VEH_FAST = PLAYER_RUN * 1.35;
-const VEH_CAP = { shadow: 11.5, smily: 11.5, boiled: 12.5, siren: 13.5, locust: 12.5 };
+const VEH_CAP = { shadow: 15, smily: 15, boiled: 16.5, siren: 17, locust: 16.5 };
 const SIGNATURE = {
   smily:  (m, p, d, facing) => (d < 35 && facing > 0.75 ? 0.1 : 1.3),
   boiled: (m, p) => ((p.noiseAge ?? 99) < 1.5 ? 1.35 : 1),
@@ -240,7 +240,11 @@ export class MonsterController {
     } else {
       const goal = this._goal(m, tgt);
       const door = m.aiState === 'STUNNED' ? null : this._doorFor(m, goal);
+      const chasing = m.aiState === 'CHASE' || m.aiState === 'LOST_TARGET' || m.aiState === 'INVESTIGATE';
+      if (chasing) this._stomp(m);
+      const wall = !door && chasing && this.cfg.wallTime ? this._wallFor(m, goal) : null;
       if (door) this._breachStart(m, door);
+      else if (wall) this._wallTick(m, wall, dt);
       else this._aiMove(m, tgt, dt, base, frenzy);
     }
 
@@ -296,7 +300,7 @@ export class MonsterController {
       this._stuck = 0;
     }
 
-    resolveCollisions(m.position, this.cfg.radius, this.colliders);
+    resolveCollisions(m.position, this.cfg.colRadius ?? this.cfg.radius, this.colliders);
     const c = clampToWorld(m.position.x, m.position.z);
     m.position.x = c.x;
     m.position.z = c.z;
@@ -340,6 +344,43 @@ export class MonsterController {
     }
   }
 
+  _stomp(m) {
+    if (!this.cfg.stomp || this.state._level) return;
+    const R = this.cfg.radius;
+    for (const c of WALLS) {
+      if (c.type !== 'wall') continue;
+      const dx = Math.max(c.minX - m.position.x, 0, m.position.x - c.maxX);
+      const dz = Math.max(c.minZ - m.position.z, 0, m.position.z - c.maxZ);
+      if (dx * dx + dz * dz > R * R) continue;
+      const ox = c.minX + c.maxX - 2 * m.position.x, oz = c.minZ + c.maxZ - 2 * m.position.z, l = Math.hypot(ox, oz) || 1;
+      this.state._wallFx?.(c, ox / l, oz / l);
+    }
+  }
+  _wallFor(m, goal) {
+    if (!goal || this.state._level) return null;
+    const from = isInsideBuilding(m.position.x, m.position.z), to = isInsideBuilding(goal.x, goal.z);
+    const b = from === to ? null : (from || to);
+    if (!b || b.breached) return null;
+    let best = null, bd = this.cfg.radius + 1.6;
+    for (const c of WALLS) {
+      if (c.bid !== b.id || c.type !== 'wall') continue;
+      const d = Math.hypot(m.position.x - Math.max(c.minX, Math.min(m.position.x, c.maxX)),
+                           m.position.z - Math.max(c.minZ, Math.min(m.position.z, c.maxZ)));
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+  _wallTick(m, c, dt) {
+    if (!this._wb || this._wb.c !== c) this._wb = { c, t: 0 };
+    const dx = (c.minX + c.maxX) / 2 - m.position.x, dz = (c.minZ + c.maxZ) / 2 - m.position.z, l = Math.hypot(dx, dz) || 1;
+    m.rotation.yaw = Math.atan2(-dx, -dz);
+    this._wb.t += dt;
+    if (this._wb.t >= (this.cfg.wallTime || 2)) {
+      this.state._wallFx?.(c, dx / l, dz / l);
+      this._wb = null; this._path = null;
+    }
+  }
+
   _predict(mem) {
     const p = mem.lastSeenPosition;
     if (!p) return null;
@@ -354,6 +395,7 @@ export class MonsterController {
     const to = isInsideBuilding(goal.x, goal.z);
     if (from === to) return null;
     const b = from || to;
+    if (b.breached) return null;
     const d = DOORS.find((x) => x.id === b.id);
     return d && !d.open && !d.broken ? d : null;
   }
@@ -387,7 +429,7 @@ export class MonsterController {
       const gap = distXZ(m.position, goal);
       if (this._fast) {
         const cap = VEH_CAP[ROSTER[this.index]] ?? 12;
-        spd = Math.min(cap, Math.max(spd, (this._tgtSpeed || 0) * 1.04 + Math.min(4, gap * 0.1)));
+        spd = Math.min(cap, Math.max(spd, (this._tgtSpeed || 0) * 1.04 + Math.min(8, gap * 0.15)));
       } else {
         spd = Math.min(spd, PLAYER_RUN * (gap > 20 ? 1.2 : 1.06));
       }
