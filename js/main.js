@@ -273,6 +273,10 @@ function enterMenu() {
   document.getElementById('menu-player-name').textContent =
     `${profile.displayName} · ${profile.provider}`;
   refreshContinueBtn();
+  if (sessionStorage.getItem('autoStart')) {
+    sessionStorage.removeItem('autoStart');
+    setTimeout(() => document.getElementById('btn-start')?.click(), 250);
+  }
 }
 
 async function setupLocalGame(fromSave = false) {
@@ -809,6 +813,16 @@ const currentMap = () => {
 const roomKey = () => { const c = currentCh(); return c ? `${currentMap()}:${c}` : currentMap(); };
 const curMissionKey = () =>
   currentCh() || (typeof LEVELS !== 'undefined' && LEVELS[currentMap()]?.mission) || (currentMap() === 'world' ? 'world' : currentMap());
+const storyDone = (key) => {
+  try { return !!localStorage.getItem(`asap_story_${MISSIONS[key].id}`); } catch (e) { return false; }
+};
+const storyOpen = (i) =>
+  new URLSearchParams(location.search).has('unlock') || i === 0 || storyDone(STORY[i - 1].key);
+function chapterForMap(map) {
+  const idx = STORY.map((_, i) => i).filter((i) => STORY[i].map === map && storyOpen(i));
+  const i = idx.find((k) => !storyDone(STORY[k].key)) ?? idx[idx.length - 1];
+  return i == null ? null : STORY[i];
+}
 function switchMap(id) {
   const u = new URL(location.href);
   applyMapParam(u, id);
@@ -819,10 +833,8 @@ function switchMap(id) {
 function wireChapterSelect() {
   const sel = document.getElementById('chapter-select');
   if (!sel) return;
-  const all = new URLSearchParams(location.search).has('unlock');
-  const done = (key) => { try { return !!localStorage.getItem(`asap_story_${MISSIONS[key].id}`); } catch (e) { return false; } };
   sel.innerHTML = STORY.map((c, i) => {
-    const open = all || i === 0 || (STORY[i - 1] && done(STORY[i - 1].key));
+    const open = storyOpen(i);
     const title = MISSIONS[c.key]?.title || c.key;
     return `<option value="${c.map}:${c.key}"${open ? '' : ' disabled'}>Episode ${c.n}: ${title}${open ? '' : ' 🔒'}</option>`;
   }).join('');
@@ -837,7 +849,16 @@ function wireUI(canvas) {
   const ms = document.getElementById('map-select');
   if (ms) {
     ms.value = currentMap();
-    ms.addEventListener('change', () => switchMap(ms.value));
+    ms.addEventListener('change', () => {
+      if (document.getElementById('game-mode')?.value !== 'story') return switchMap(ms.value);
+      const c = chapterForMap(ms.value);
+      if (!c) {
+        toast('Episode untuk map ini masih terkunci. Selesaikan episode sebelumnya dulu.', 3500);
+        ms.value = currentMap();
+        return;
+      }
+      switchMap(`${c.map}:${c.key}`);
+    });
   }
   try { wireChapterSelect(); } catch (e) { console.warn('chapter-select', e); }
   // Login
@@ -915,13 +936,30 @@ function wireUI(canvas) {
 
     const modeSelect = document.getElementById('game-mode');
   const dayWrap = document.getElementById('day-limit-wrap');
+  const savedMode = sessionStorage.getItem('asap_mode');
+  if (savedMode && modeSelect && [...modeSelect.options].some((o) => o.value === savedMode)) modeSelect.value = savedMode;
   const syncModeUI = () => {
-    if (dayWrap) dayWrap.style.display = modeSelect?.value === 'days' ? '' : 'none';
+    const md = modeSelect?.value;
+    if (dayWrap) dayWrap.style.display = md === 'days' ? '' : 'none';
+    const cw = document.getElementById('chapter-wrap');
+    if (cw) cw.style.display = md === 'story' ? '' : 'none';
   };
-  modeSelect?.addEventListener('change', syncModeUI);
+  modeSelect?.addEventListener('change', () => { sessionStorage.setItem('asap_mode', modeSelect.value); syncModeUI(); });
   syncModeUI();
 
+  document.getElementById('btn-next-ep')?.addEventListener('click', (e) => {
+    const target = e.currentTarget.dataset.target;
+    if (!target) return;
+    sessionStorage.setItem('asap_mode', 'story');
+    sessionStorage.setItem('autoStart', '1');
+    switchMap(target);
+  });
+
   document.getElementById('btn-start').addEventListener('click', async () => {
+    if (document.getElementById('game-mode')?.value === 'story') {
+      const i = STORY.findIndex((c) => c.key === curMissionKey());
+      if (i >= 0 && !storyOpen(i)) { toast(`Episode ${STORY[i].n} masih terkunci`, 3000); return; }
+    }
     mode = 'solo';
     document.getElementById('menu-screen').classList.add('hidden');
     document.getElementById('loading-screen').classList.remove('hidden');
@@ -1313,7 +1351,7 @@ function showGameOver(win, keepRunning = false) {
   }
   const nb = document.getElementById('btn-next-ep');
   if (nb) {
-    nb.classList.toggle('hidden', !nx);
+    nb.classList.toggle('hidden', !nx || mode === 'multi');
     nb.dataset.target = nx ? `${nx.map}:${nx.key}` : '';
     if (nx) nb.textContent = `Lanjut → Episode ${nx.n}: ${MISSIONS[nx.key].title}`;
   }

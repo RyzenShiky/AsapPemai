@@ -254,6 +254,8 @@ class MissionUI {
   dispose() { this.root.remove(); this.prompt.remove(); }
 }
 
+const markStoryDone = (id) => { try { localStorage.setItem('asap_story_' + id, '1'); } catch (e) { /* */ } };
+
 export class Mission {
   constructor(def, io) {
     this.def = def;
@@ -327,7 +329,7 @@ export class Mission {
     if (!this.s.complete && this._gAcc >= 0.25) {
       this._gAcc = 0;
       if (this._gatherDone()) { this.s.complete = true;
-      try { localStorage.setItem('asap_story_' + this.def.id, '1'); } catch (e) { /* */ }; changed = true; this._say(this.def.story?.ending); this.io.onComplete(); }
+      if (this.s.story) markStoryDone(this.def.id); changed = true; this._say(this.def.story?.ending); this.io.onComplete(); }
     }
     if (changed) this._commit();
   }
@@ -394,7 +396,10 @@ export class Mission {
       this._narrate(this.def.steps[prev]?.id, st?.id);
       if (st) this.io.onStep(st);
     }
-    if (this.s.complete && !wasDone) this._say(this.def.story?.ending);
+    if (this.s.complete && !wasDone) {
+      this._say(this.def.story?.ending);
+      if (this.s.story) markStoryDone(this.def.id);
+    }
   }
 
   _input() {
