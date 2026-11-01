@@ -264,8 +264,11 @@ export class PlayerController {
         p.alive = false;
         p.isDowned = false;
         this.state.data.progress.deaths += 1;
-        this.state.data.progress.gameOver = true;
-        this.state.data.progress.win = false;
+        // Multiplayer: jangan set gameOver lokal (host yang putuskan). Tulis kematian diri saja.
+        if (!this.state._multi) {
+          this.state.data.progress.gameOver = true;
+          this.state.data.progress.win = false;
+        }
         return;
       }
       let speed = 0.7;

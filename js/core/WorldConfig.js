@@ -22,18 +22,13 @@ export const PYRAMID = {
 export const onPyramid = (x, z, m = 0) => BIOME === 'desert'
   && Math.abs(x - PYRAMID.x) < PYRAMID.tiers[0][0] + m && Math.abs(z - PYRAMID.z) < PYRAMID.tiers[0][1] + m;
 
+export const PYRAMID_TOP = PYRAMID.tiers.reduce((s, t) => s + t[2], 0);
+export const PYRAMID_H0 = PYRAMID_TOP * 1.2;
+
 export function pyramidHeight(x, z) {
   if (BIOME !== 'desert') return 0;
-  const dx = Math.abs(x - PYRAMID.x), dz = Math.abs(z - PYRAMID.z), b = PYRAMID.batter;
-  let y0 = 0, best = 0;
-  for (const [ax, az, h] of PYRAMID.tiers) {
-    if (dx <= ax && dz <= az) {
-      const t = Math.min(1, (ax - dx) / b, (az - dz) / b);
-      best = Math.max(best, y0 + h * t);
-    }
-    y0 += h;
-  }
-  return best;
+  const t = Math.max(Math.abs(x - PYRAMID.x) / PYRAMID.tiers[0][0], Math.abs(z - PYRAMID.z) / PYRAMID.tiers[0][1]);
+  return t >= 1 ? 0 : Math.min(PYRAMID_TOP, PYRAMID_H0 * (1 - t));
 }
 
 export function worldToTile(x, z) {

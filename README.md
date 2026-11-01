@@ -46,3 +46,8 @@ Prefer compressed GLBs (meshopt + webp). `monster.glb` removed (unused).
 - Room codes are not a secret; rules now prefer membership for writes
 - See **CREDITS.md** for asset license risks (Boiled One NC, IP characters)
 - Compress GLBs (smily ~13MB, survivor ~6MB) before mobile release
+
+
+## Catatan dev UI
+- Atribusi model lengkap di CREDITS.md. Label “hati-hati rilis publik” hanya di README, bukan di menu pemain.
+- Menu memakai `100dvh` + scroll agar tidak terpotong di 768p / HP.

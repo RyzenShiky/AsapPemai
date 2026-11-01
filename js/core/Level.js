@@ -717,8 +717,9 @@ const PYR = {
     .map(([a, b, c]) => [a * PK, b * PK, c * PK]),
 };
 const PYR_TOP = PYR.tiers.reduce((s, t) => s + t[2], 0);
+const PYR_H0 = PYR_TOP * 1.2; // apex bayangan, dipotong di PYR_TOP => puncak datar kecil
 const RAMP = { x: 0, hw: 7, slope: 0.62 };
-RAMP.zTop = PYR.z + PYR.tiers[5][1] - PYR.tiers[5][2] * PYR.batter - 1;
+RAMP.zTop = PYR.z + PYR.tiers[0][1] * (1 - PYR_TOP / PYR_H0) - 1;
 RAMP.z0 = RAMP.zTop + PYR_TOP / RAMP.slope;
 RAMP.zEnd = RAMP.zTop - 4;
 const rampH = (x, z) => (Math.abs(x - RAMP.x) > RAMP.hw || z > RAMP.z0 || z < RAMP.zEnd)
@@ -753,14 +754,8 @@ const rubble = (x, z) => {
   return 4.5 * (0.65 + 0.7 * vn(x / 6, z / 6)) * (1 - (out + 4) / 18) ** 2;
 };
 const pyrH = (x, z) => {
-  const dx = Math.abs(x - PYR.x), dz = Math.abs(z - PYR.z);
-  let y0 = 0, best = 0;
-  for (const [ax, az, th] of PYR.tiers) {
-    const b = th * PYR.batter;
-    if (dx <= ax && dz <= az) best = Math.max(best, y0 + th * Math.min(1, (ax - dx) / b, (az - dz) / b));
-    y0 += th;
-  }
-  return best;
+  const t = Math.max(Math.abs(x - PYR.x) / PYR.tiers[0][0], Math.abs(z - PYR.z) / PYR.tiers[0][1]);
+  return t >= 1 ? 0 : Math.min(PYR_TOP, PYR_H0 * (1 - t));
 };
 const terrainH = (x, z) => dunes(x, z) * flatMask(x, z) * (1 - (typeof rampFlat === "function" ? rampFlat(x, z) : 0)) + rubble(x, z);
 const floorH = (x, z) => Math.max(terrainH(x, z), pyrH(x, z), typeof rampH === "function" ? rampH(x, z) : 0);
@@ -881,43 +876,43 @@ const dbox = (x0, x1, y0, y1, z0, z1, tu = 6, tv = 6) => {
 };
 
 const pyramidGroup = () => {
-  const mat = dmats().stone, grp = new THREE.Group(), tot = PYR.tiers.reduce((s, t) => s + t[2], 0);
-  const col = new THREE.Color();
-  let y0 = 0;
-  PYR.tiers.forEach(([ax, az, th], ti) => {
-    const b = th * PYR.batter, WS = 28, HS = 5;
-    const g = new THREE.BoxGeometry(2 * ax, th, 2 * az, WS, HS, WS);
-    const p = g.attributes.position, uv = g.attributes.uv;
-    const cnt = [(WS + 1) * (HS + 1), (WS + 1) * (HS + 1), (WS + 1) * (WS + 1), (WS + 1) * (WS + 1), (WS + 1) * (HS + 1), (WS + 1) * (HS + 1)];
-    const ext = [[2 * az, th], [2 * az, th], [2 * ax, 2 * az], [2 * ax, 2 * az], [2 * ax, th], [2 * ax, th]];
-    let f = 0, left = cnt[0];
-    const colors = new Float32Array(p.count * 3);
-    for (let i = 0; i < p.count; i++) {
-      while (left === 0) left = cnt[++f];
-      left--;
-      uv.setXY(i, uv.getX(i) * ext[f][0] / 6, uv.getY(i) * ext[f][1] / 4.4);
-      const t = (p.getY(i) + th / 2) / th;
-      let x = p.getX(i) * (ax - b * t) / ax, z = p.getZ(i) * (az - b * t) / az, y = p.getY(i);
-      const hx = ax - b * t, ez = az - b * t;
-      const nz = vn((x + 500) / 5 + ti * 7, (y + y0 + 500) / 4) - 0.5;
-      const nx = vn((z + 500) / 5 + ti * 3, (y + y0 + 500) / 4) - 0.5;
-      const edge = Math.abs(x) > hx - 0.01, edgeZ = Math.abs(z) > ez - 0.01;
-      const chip = t > 0.9 ? vn(x / 2 + 40, z / 2) * 0.25 : 0;
-      if (edge) x += Math.sign(x) * (nx * 0.3 - chip);
-      if (edgeZ) z += Math.sign(z) * (nz * 0.3 - chip);
-      p.setXYZ(i, x, y, z);
-      const k = 0.9 + vn(x / 3 + 11, (y + y0) / 2 + z / 3) * 0.14;
-      const gt = (y0 + th * t) / tot;
-      col.setRGB((0.80 + 0.14 * gt) * k, (0.69 + 0.17 * gt) * k, (0.5 + 0.22 * gt) * k);
-      colors.set([col.r, col.g, col.b], i * 3);
+  const mat = dmats().stone, grp = new THREE.Group();
+  const [ax, az] = PYR.tiers[0];
+  const f = 1 - PYR_TOP / PYR_H0, tx = ax * f, tz = az * f;
+  const B = [[-ax, -az], [ax, -az], [ax, az], [-ax, az]];
+  const T = [[-tx, -tz], [tx, -tz], [tx, tz], [-tx, tz]];
+  const N = 32, M = 32, col = new THREE.Color();
+  const pos = [], uvs = [], cols = [], idx = [];
+  const vtx = (x, y, z, u, v) => {
+    pos.push(x, y, z); uvs.push(u, v);
+    const k = 0.92 + (typeof vn === 'function' ? vn(x / 3 + 11, y / 2 + z / 3) : Math.random()) * 0.12, gt = y / PYR_TOP;
+    col.setRGB((0.80 + 0.14 * gt) * k, (0.69 + 0.17 * gt) * k, (0.5 + 0.22 * gt) * k);
+    cols.push(col.r, col.g, col.b);
+  };
+  for (let s = 0; s < 4; s++) {
+    const b0 = B[s], b1 = B[(s + 1) % 4], t0 = T[s], t1 = T[(s + 1) % 4], base = pos.length / 3;
+    const len = Math.hypot(b1[0] - b0[0], b1[1] - b0[1]), slant = Math.hypot(PYR_TOP, ax * (1 - f));
+    for (let j = 0; j <= M; j++) for (let i = 0; i <= N; i++) {
+      const u = i / N, v = j / M;
+      const bx = b0[0] + (b1[0] - b0[0]) * u, bz = b0[1] + (b1[1] - b0[1]) * u;
+      const px = t0[0] + (t1[0] - t0[0]) * u, pz = t0[1] + (t1[1] - t0[1]) * u;
+      vtx(PYR.x + bx + (px - bx) * v, PYR_TOP * v, PYR.z + bz + (pz - bz) * v, u * len / 6, v * slant / 4.4);
     }
-    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    g.computeVertexNormals();
-    const m = new THREE.Mesh(g, mat);
-    m.position.set(PYR.x, y0 + th / 2, PYR.z);
-    grp.add(m);
-    y0 += th;
-  });
+    for (let j = 0; j < M; j++) for (let i = 0; i < N; i++) {
+      const a = base + j * (N + 1) + i, b = a + 1, c = a + (N + 1), d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+  }
+  const tb = pos.length / 3;
+  for (const [px, pz] of T) vtx(PYR.x + px, PYR_TOP, PYR.z + pz, px / 6, pz / 6);
+  idx.push(tb, tb + 3, tb + 1, tb + 1, tb + 3, tb + 2);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  grp.add(new THREE.Mesh(g, mat));
   const Lr = RAMP.z0 - RAMP.zEnd, Lt = RAMP.z0 - RAMP.zTop;
   try {
     const sh = new THREE.Shape([[0, -8], [0, 0], [Lt, PYR_TOP], [Lr, PYR_TOP], [Lr, -8]].map(([a, b]) => new THREE.Vector2(a, b)));

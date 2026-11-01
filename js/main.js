@@ -13,6 +13,7 @@ import { DAY_SECONDS, MATCH_SECONDS, phaseFromProgress, lightingForProgress, ran
 import { ITEMS, RECIPES, SHOP, MAX_SLOTS, MAX_WEIGHT, canCraft, canCarry, invWeight, rollLoot, sellPrice, addItem, removeItems, countOf, NO_SELL } from './gameplay/Items.js';
 import { Mission, Tutorial, Subtitles, MISSIONS, validateAnchors, STORY, chapterByKey, nextChapter } from './gameplay/Mission.js';
 import { PickOne } from './gameplay/PickOne.js';
+import { Shawarma } from './gameplay/Shawarma.js';
 import { isInsideBuilding } from './core/Buildings.js';
 import { SanityManager } from './gameplay/Sanity.js';
 import { HallucinationDirector } from './gameplay/HallucinationDirector.js';
@@ -40,7 +41,7 @@ import {
 let renderer, player, monsters, audio, clock, state, colliders, touch;
 let running = false;
 let room = null;
-let mission = null, tutorial = null, subs = null, pickOne = null;
+let mission = null, tutorial = null, subs = null, pickOne = null, shawarma = null;
 let missionKey = 'world';
 let paused = false;
 let mode = 'solo';
@@ -338,6 +339,8 @@ async function setupLocalGame(fromSave = false) {
     ? (pl) => level.spawn(pl[(Math.random() * pl.length) | 0], 40, 80)
     : null;
   if (level) Object.assign(state.data.player.position, { x: level.def.start?.x ?? 1.5, y: 1.7, z: level.def.start?.z ?? 7.5 });
+  state._spawn = { x: state.data.player.position.x, z: state.data.player.position.z };
+  state._multi = mode === 'multi';
   if (level?.def.pickups && !resumed) state.data.pickups = level.def.pickups();
   while (state.data.monsters.length < MONSTER_COUNT) {
     const i = state.data.monsters.length;
@@ -422,21 +425,35 @@ async function setupLocalGame(fromSave = false) {
 
   mission?.dispose(); tutorial?.dispose(); subs?.dispose();
   pickOne?.dispose(); pickOne = null;
+  shawarma?.dispose();
+  const wantSh = mode !== 'multi' && document.getElementById('game-mode')?.value === 'shawarma'; // multi dimatikan (BETA)
+  shawarma = wantSh && !resumed ? new Shawarma({ room: mode === 'multi' ? room : null, state, renderer, audio }) : null;
+  if (shawarma) {
+    state.data.world.gameMode = 'endless';
+    state._pickOneOn = true;
+    try { shawarma.hostBegin(); } catch (e) { console.warn(e); }
+    try { toast('Shawarma Kiosk — BETA (solo). Masih dikembangkan.', 4500); } catch (e) { /* */ }
+  }
   const ch = new URLSearchParams(location.search).get('ch');
   const key = (ch && MISSIONS[ch]) ? ch : (level ? (level.def.mission || 'backrooms0') : 'world');
   missionKey = key;
   const mDef = MISSIONS[key];
   subs = new Subtitles(document.getElementById('hud'));
-  mission = new Mission(mDef, missionIO());
-  if (state.data.mission && state.data.mission.id === mDef.id) {
-    mission.s = { ...mission._fresh(), ...state.data.mission, done: state.data.mission.done || {}, contrib: {}, ack: {} };
+  if (!shawarma) {
+    mission = new Mission(mDef, missionIO());
+    if (state.data.mission && state.data.mission.id === mDef.id) {
+      mission.s = { ...mission._fresh(), ...state.data.mission, done: state.data.mission.done || {}, contrib: {}, ack: {} };
+    } else {
+      mission.start();
+    }
+    tutorial = new Tutorial(document.getElementById('hud'));
+    renderer?.spawnMissionMarkers?.(mDef.anchors, !!level && !level.def.hilly);
+    renderer?.updateMissionMarkers?.(mission.doneIds());
+    renderer?.setMissionMarkersVisible?.(mission.active);
   } else {
-    mission.start();
+    mission = null; tutorial = null;
+    renderer?.setMissionMarkersVisible?.(false);
   }
-  tutorial = new Tutorial(document.getElementById('hud'));
-  renderer?.spawnMissionMarkers?.(mDef.anchors, !!level && !level.def.hilly);
-  renderer?.updateMissionMarkers?.(mission.doneIds());
-  renderer?.setMissionMarkersVisible?.(mission.active);
   if (level && !level.def.hilly) { const bad = validateAnchors(mDef); if (bad?.length) console.warn('Anchor tak terjangkau:', bad); }
 
   player.onThrow = (from, to) => {
@@ -617,6 +634,7 @@ async function beginMultiGame() {
     document.getElementById('loading-screen').classList.remove('hidden');
     await setupLocalGame(false);
     pickOne = room.meta?.mode === 'pickone' ? new PickOne({ room, state, controllers: () => monsters }) : null;
+    // shawarma created in setupLocalGame when meta.mode === 'shawarma'
     if (pickOne && room.isHost) pickOne.hostBegin();
     await audio.resume();
     document.getElementById('loading-screen').classList.add('hidden');
@@ -632,6 +650,7 @@ async function beginMultiGame() {
 }
 
 async function leaveRoom() {
+  try { shawarma?.dispose(); shawarma = null; } catch (e) { /* */ }
   if (!room) return;
   const r = room;
   room = null;
@@ -966,6 +985,10 @@ function wireUI(canvas) {
     if (dayWrap) dayWrap.style.display = md === 'days' ? '' : 'none';
     const cw = document.getElementById('chapter-wrap');
     if (cw) cw.style.display = md === 'story' ? '' : 'none';
+    const mw = document.getElementById('map-select-wrap');
+    if (mw) mw.style.display = md === 'shawarma' ? 'none' : '';
+    const sn = document.getElementById('shawarma-beta-note');
+    if (sn) sn.style.display = md === 'shawarma' ? '' : 'none';
   };
   modeSelect?.addEventListener('change', () => { sessionStorage.setItem('asap_mode', modeSelect.value); syncModeUI(); });
   syncModeUI();
@@ -1170,12 +1193,15 @@ function wireUI(canvas) {
         }
       }
       // patch name after join
-      await room.writePlayer({
-        position: { x: 0, y: 1.7, z: 8 },
-        rotation: { yaw: 0 },
-        alive: true,
-        health: 100,
-      });
+      {
+        const sp = state?._spawn || { x: 0, z: 8 };
+        await room.writePlayer({
+          position: { x: sp.x, y: 1.7, z: sp.z },
+          rotation: { yaw: 0 },
+          alive: true,
+          health: 100,
+        });
+      }
       // force name in firebase
       const { ref, update } = await import('https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js');
       const { getDb } = await import('./net/firebase.js');
@@ -1252,11 +1278,19 @@ function wireUI(canvas) {
   });
 
   document.getElementById('btn-restart').addEventListener('click', async () => {
-    if (room && mode === 'multi' && !room.gameStatus?.gameOver) {
-      await room.respawnSelf();
+    if (room && mode === 'multi') {
+      const sp = state._spawn || { x: 0, z: 8 };
+      if (room.isHost && room.gameStatus?.gameOver) {
+        try { await room.resetGame(); } catch (e) { console.warn(e); }
+      }
+      try { await room.respawnSelf(sp); } catch (e) { console.warn(e); }
+      if (shawarma) {
+        shawarma.resetLocal();
+        if (room.isHost) try { await shawarma.hostBegin(); } catch (e) { console.warn(e); }
+      }
       const p = state.data.player;
       Object.assign(p, { alive: true, isDowned: false, health: 100, downedTimer: 0, sanity: 100 });
-      p.position.x = 0; p.position.y = 1.7; p.position.z = 8;
+      p.position.x = sp.x; p.position.y = 1.7; p.position.z = sp.z;
       state.data.progress.gameOver = false;
       document.getElementById('gameover-screen')?.classList.add('hidden');
       document.getElementById('hud')?.classList.remove('hidden');
@@ -1265,7 +1299,7 @@ function wireUI(canvas) {
       deadShown = false;
       caughtStarted = false; caughtActive = false; caughtAt = 0;
       renderer?._endJumpscare?.();
-      startLoop();
+      if (!running) startLoop();
       return;
     }
     document.getElementById('gameover-screen').classList.add('hidden');
@@ -1355,9 +1389,11 @@ function showGameOver(win, keepRunning = false) {
   if (state) state._lastRaining = false;
   document.getElementById('hud').classList.add('hidden');
   document.getElementById('gameover-screen').classList.remove('hidden');
-  let title = win ? 'YOU ESCAPED' : 'YOU DIED';
+  let title = win ? 'KAMU LOLOS' : 'KAMU MATI';
   let sub = null;
-  if (pickOne?.pk?.phase === 'over' && pickOne.pk.text) {
+  if (shawarma?.pk?.phase === 'over' && shawarma.pk.text) {
+    title = shawarma.pk.text;
+  } else if (pickOne?.pk?.phase === 'over' && pickOne.pk.text) {
     title = pickOne.pk.text;
   } else if (pickOne?.isMonster?.()) {
     title = win ? 'HUNT COMPLETE' : 'SURVIVORS ESCAPED';
@@ -1444,7 +1480,9 @@ function tickHeartbeat(dt, bpm, danger) {
 
 function tickSanity(dt, nearestMonsterDistVal, isDark) {
   if (!state) return;
-  const { tier, value } = sanity.update(state.data.player, dt, nearestMonsterDistVal, isDark);
+  const { tier, value } = shawarma
+      ? { tier: 'stable', value: 100 }
+      : sanity.update(state.data.player, dt, nearestMonsterDistVal, isDark);
   const fill = document.getElementById('sanity-fill');
   if (fill) fill.style.width = `${value}%`;
   const app = document.getElementById('app');
@@ -1479,9 +1517,19 @@ function startCaught() {
   if (caughtStarted) return;
   caughtStarted = true;
   caughtAt = performance.now();
-  const idx = nearestMonsterIndex(30);
+  let idx = nearestMonsterIndex(30);
+  if (idx < 0) idx = nearestMonsterIndex(Infinity);
   caughtActive = idx >= 0 && !!renderer?.startJumpscare({ kind: 'caught', monsterIndex: idx, duration: 1.9 });
-  if (!caughtActive) return;
+  if (!caughtActive) {
+    // fallback: stinger + flash tanpa mesh monster
+    try { audio.playJumpscareStinger?.(); } catch (e) { /* */ }
+    flashOverlay('caught');
+    shake();
+    hideTouch();
+    document.getElementById('hud')?.classList.add('hidden');
+    caughtActive = true; // biar tickCaught jalan ~2.8s
+    return;
+  }
   audio.playJumpscareStinger(); flashOverlay('caught'); shake();
   hideTouch();
   document.getElementById('hud')?.classList.add('hidden');
@@ -1661,13 +1709,14 @@ function startLoop() {
     if (!used) tryVehicleInteract();
     tickDoorBash(dt);
     pickOne?.tick(dt);
+    shawarma?.tick();
     if (room?.isHost) room.processRevives?.();
     if (cctv.on) {
       const pl = state.data.player;
       if (pl.health < cctv.hp - 0.5 || pl.isDowned) cctv.exit();
       else cctv.hp = pl.health;
     }
-    level?.update(state.data.player.position, dt, state.data.player, audio);
+    if (!shawarma) level?.update(state.data.player.position, dt, state.data.player, audio);
     try {
       const sc = LANDMARKS.summoningCircle, pl = state.data.player;
       if (sc && Math.hypot(pl.position.x - sc.x, pl.position.z - sc.z) < 7)
@@ -1700,7 +1749,7 @@ function startLoop() {
           if (pl.isDowned) {
             pl.alive = false;
             state.data.progress.deaths += 1;
-            state.data.progress.gameOver = true;
+            if (mode !== 'multi') state.data.progress.gameOver = true;
           } else {
             pl.health = Math.max(0, pl.health - dmg);
             if (pl.health <= 0) {
@@ -1763,8 +1812,18 @@ function startLoop() {
         const id = m.id || `m${i}`;
         const r = rm[id];
         if (!r) return;
-        m.position.x = r.x; m.position.y = r.y; m.position.z = r.z;
-        m.rotation.yaw = r.yaw;
+        {
+          const kk = 1 - Math.exp(-12 * dt);
+          if (!m._rInit || Math.hypot(r.x - m.position.x, r.z - m.position.z) > 15) {
+            m.position.x = r.x; m.position.y = r.y; m.position.z = r.z; m.rotation.yaw = r.yaw; m._rInit = true;
+          } else {
+            m.position.x += (r.x - m.position.x) * kk;
+            m.position.y += (r.y - m.position.y) * kk;
+            m.position.z += (r.z - m.position.z) * kk;
+            const dy = Math.atan2(Math.sin(r.yaw - m.rotation.yaw), Math.cos(r.yaw - m.rotation.yaw));
+            m.rotation.yaw += dy * kk;
+          }
+        }
         m.aiState = r.aiState;
         m.active = r.active !== false;
         if (r.type && ROSTER[i] && r.type !== ROSTER[i]) console.warn('Versi game berbeda, muat ulang halaman');
@@ -1844,7 +1903,7 @@ function startLoop() {
       netWriteAcc += dt;
       if (netWriteAcc >= 0.1) {
         netWriteAcc = 0;
-        room.writePlayer(state.data.player);
+        if (!shawarma) room.writePlayer(state.data.player);
         // ensure name on write
         if (room.remotePlayers[room.uid]) {
           /* name already set */
@@ -1965,7 +2024,7 @@ function startLoop() {
     state.data.progress.daysReached = dayIndex;
     state.data.world.timeOfDay = dayProgress;
     const lights = lightingForProgress(dayProgress);
-    if (!level && renderer.applyDayLighting) renderer.applyDayLighting(lights);
+    if (!level && !shawarma && renderer.applyDayLighting) renderer.applyDayLighting(lights);
     const phase = phaseFromProgress(dayProgress);
     const timerEl = document.getElementById('match-timer');
     if (timerEl) {
@@ -2001,15 +2060,15 @@ function startLoop() {
     
     
     // Dynamic weather (host authority in multi) — clear/rain/fog/storm + lightning
-    if (mode === 'solo' || (room && room.isHost)) {
-      const wr = weatherCtrl.update(dt, now, state.data.world, renderer, audio);
-      hearingMask = wr.hearingMask;
-      state._hearingMask = hearingMask;
-    } else if (room && room.gameStatus && room.gameStatus.weather) {
-      state.data.world.weather = room.gameStatus.weather;
-      const wr = weatherCtrl.update(dt, now, state.data.world, renderer, audio, { follow: true });
-      hearingMask = wr.hearingMask;
-      state._hearingMask = hearingMask;
+    if (!shawarma) {
+      if (mode === 'solo' || (room && room.isHost)) {
+        const wr = weatherCtrl.update(dt, now, state.data.world, renderer, audio);
+        hearingMask = wr.hearingMask; state._hearingMask = hearingMask;
+      } else if (room && room.gameStatus && room.gameStatus.weather) {
+        state.data.world.weather = room.gameStatus.weather;
+        const wr = weatherCtrl.update(dt, now, state.data.world, renderer, audio, { follow: true });
+        hearingMask = wr.hearingMask; state._hearingMask = hearingMask;
+      }
     }
 
     // Player speed modifier from weather
@@ -2020,7 +2079,7 @@ function startLoop() {
     }
 
     // World atmosphere director (unseen props only)
-    if (!worldDirector && renderer?.scene) {
+    if (!shawarma && !worldDirector && renderer?.scene) {
       worldDirector = new WorldDirector(renderer.scene, pacing, audio);
     }
     {
@@ -2038,7 +2097,7 @@ function startLoop() {
     }
 
     // Hallucinations (audio/visual only — never real AI stimuli)
-    if (!hallu && audio && renderer) {
+    if (!shawarma && !hallu && audio && renderer) {
       hallu = new HallucinationDirector(audio, renderer);
     }
     if (hallu) {
@@ -2219,6 +2278,7 @@ function startLoop() {
       errStreak = 0;
     } catch (e) {
       if (errStreak++ < 3) console.error('frame error', e);
+      try { renderer.render(state.data, player.eyePosition, state.data.player.rotation.yaw, state.data.player.rotation.pitch, 0.016); } catch (_) { /* */ }
       if (errStreak > 180) {
         running = false;
         try { toast('Terjadi error. Muat ulang halaman.'); } catch (_) { /* */ }

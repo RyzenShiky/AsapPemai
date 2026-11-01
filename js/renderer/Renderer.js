@@ -281,10 +281,48 @@ export class Renderer {
         }
       }
     }
+    // pose animasi != bind pose pada rig Mixamo
+    if (g.animations && g.animations.length) this._fitToAnimatedPose(model, g.animations, cfg.h);
     const root = new THREE.Group();
     root.add(model);
     root.userData.face = cfg.face ?? 0;
     return { mesh: root, clips: g.animations || [] };
+  }
+
+  _fitToAnimatedPose(model, clips, targetH) {
+    const mixer = new THREE.AnimationMixer(model);
+    const box = new THREE.Box3();
+    const STEPS = 10;
+    const sample = () => {
+      let minY = Infinity, maxY = -Infinity, cx = 0, cz = 0, first = true;
+      for (const clip of clips) {
+        const act = mixer.clipAction(clip);
+        act.play();
+        for (let k = 0; k < STEPS; k++) {
+          act.time = (clip.duration * k) / STEPS;
+          mixer.update(0);
+          model.updateMatrixWorld(true);
+          box.setFromObject(model, true);
+          if (first) { cx = (box.min.x + box.max.x) / 2; cz = (box.min.z + box.max.z) / 2; first = false; }
+          minY = Math.min(minY, box.min.y);
+          maxY = Math.max(maxY, box.max.y);
+        }
+        act.stop();
+      }
+      return { minY, maxY, cx, cz };
+    };
+    let s = sample();
+    const h = s.maxY - s.minY;
+    if (isFinite(h) && h > 0.01 && targetH) {
+      model.scale.multiplyScalar(targetH / h);
+      model.position.multiplyScalar(targetH / h);
+      model.updateMatrixWorld(true);
+      s = sample();
+    }
+    if (isFinite(s.minY)) model.position.set(model.position.x - s.cx, model.position.y - s.minY, model.position.z - s.cz);
+    mixer.stopAllAction();
+    mixer.uncacheRoot(model);
+    model.updateMatrixWorld(true);
   }
 
   _setupSway(root) {
@@ -1276,20 +1314,18 @@ export class Renderer {
     if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
     const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, flatShading: true });
     const grp = (this.pyramidGroup = new THREE.Group());
-    let y0 = 0;
-    for (const [ax, az, h] of tiers) {
-      const geo = new THREE.BoxGeometry(ax * 2, h, az * 2);
-      const p = geo.attributes.position;
-      for (let i = 0; i < p.count; i++) if (p.getY(i) > 0) {
-        p.setX(i, p.getX(i) * (ax - batter) / ax);
-        p.setZ(i, p.getZ(i) * (az - batter) / az);
-      }
-      geo.computeVertexNormals();
-      const m = new THREE.Mesh(geo, mat);
-      m.position.set(x, y0 + h / 2, z);
-      grp.add(m);
-      y0 += h;
+    const [ax, az] = tiers[0];
+    const H = tiers.reduce((q, t) => q + t[2], 0), f = 1 - H / (H * 1.2);
+    const geo = new THREE.CylinderGeometry(1, 1, H, 4, 1).rotateY(Math.PI / 4);
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const k = p.getY(i) > 0 ? f : 1;
+      p.setXYZ(i, Math.sign(p.getX(i) || 1) * ax * k, p.getY(i), Math.sign(p.getZ(i) || 1) * az * k);
     }
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, H / 2, z);
+    grp.add(m);
     this.scene.add(grp);
   }
 
@@ -1910,12 +1946,49 @@ export class Renderer {
     }
     const rid = state?.player?.ridingVehicleId;
     const vm = rid && !this.cctv && !this._js ? this.vehicleMeshes?.[rid] : null;
+    const vc = (this._vcam ||= { init: false, id: null, lag: 0, pyaw: 0, x: 0, y: 0, z: 0, fov: 0, fovApplied: 0 });
     if (vm) {
-      const big = state.vehicles?.find((v) => v.id === rid)?.type !== 'motor';
-      const back = big ? 6.2 : 4.4, up = big ? 2.6 : 2.0;
-      const cx = vm.position.x + Math.sin(camYaw) * back, cz = vm.position.z + Math.cos(camYaw) * back;
-      this.camera.position.set(cx, Math.max(vm.position.y + up, groundHeight(cx, cz) + 1.2), cz);
-      camPitch = Math.max(-0.9, Math.min(0.5, camPitch - 0.12));
+      const veh = state.vehicles?.find((v) => v.id === rid);
+      const big = veh?.type !== 'motor';
+      const dtv = Math.min(0.1, this._dt || 0.016);
+      const spd = Math.min(1, Math.abs(veh?.speed || 0) / (big ? 18 : 13));
+      const vyaw = veh?.rotation?.yaw || 0;
+      if (!vc.init || vc.id !== rid) {
+        vc.init = true; vc.id = rid; vc.lag = 0; vc.pyaw = vyaw;
+        vc.x = vm.position.x; vc.y = vm.position.y; vc.z = vm.position.z;
+      }
+      if (state.player.ridingRole === 'driver') {
+        const dv = Math.atan2(Math.sin(vyaw - vc.pyaw), Math.cos(vyaw - vc.pyaw));
+        vc.lag = Math.max(-0.7, Math.min(0.7, vc.lag + dv));
+        vc.lag -= vc.lag * (1 - Math.exp(-5 * dtv));
+        camYaw -= vc.lag;
+      }
+      vc.pyaw = vyaw;
+      const kx = 1 - Math.exp(-14 * dtv), ky = 1 - Math.exp(-7 * dtv);
+      vc.x += (vm.position.x - vc.x) * kx;
+      vc.z += (vm.position.z - vc.z) * kx;
+      vc.y += (vm.position.y - vc.y) * ky;
+      const back = (big ? 6.2 : 4.4) + spd * 1.2, up = (big ? 2.6 : 2.0) + spd * 0.2;
+      let cx = vc.x + Math.sin(camYaw) * back, cz = vc.z + Math.cos(camYaw) * back;
+      let cy = Math.max(vc.y + up, groundHeight(cx, cz) + 1.2);
+      const sh = veh?.crashShake || 0;
+      if (sh > 0) { cx += (Math.random() - 0.5) * sh * 0.25; cy += (Math.random() - 0.5) * sh * 0.25; cz += (Math.random() - 0.5) * sh * 0.25; }
+      this.camera.position.set(cx, cy, cz);
+      const lookDown = Math.atan2(up - 1.0, back) * 0.7;
+      camPitch = Math.max(-0.9, Math.min(0.5, camPitch - lookDown));
+      vc.fov += (spd * 9 - vc.fov) * (1 - Math.exp(-4 * dtv));
+      this.camera.fov += vc.fov - vc.fovApplied;
+      vc.fovApplied = vc.fov;
+      this.camera.updateProjectionMatrix();
+    } else {
+      vc.init = false;
+      if (vc.fovApplied) {
+        let nf = vc.fovApplied * Math.exp(-6 * (this._dt || 0.016));
+        if (Math.abs(nf) < 0.05) nf = 0;
+        this.camera.fov -= vc.fovApplied - nf;
+        vc.fovApplied = nf; vc.fov = nf;
+        this.camera.updateProjectionMatrix();
+      }
     }
     this.camera.rotation.y = camYaw;
     this.camera.rotation.x = camPitch;

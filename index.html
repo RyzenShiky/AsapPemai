@@ -75,8 +75,8 @@ window.addEventListener('error', function (e) {
       <div id="login-screen" class="screen">
         <div class="fog-layer" aria-hidden="true"></div>
         <h1 class="flicker-title" data-text="LONGWAY">LONGWAY</h1>
-        <p class="subtitle">Sign in to continue</p>
-        <label>Display name
+        <p class="subtitle">Masuk untuk melanjutkan</p>
+        <label>Nama tampilan
           <input type="text" id="profile-name" maxlength="16" placeholder="Your name" />
         </label>
         <p class="subtitle" style="margin:0.5rem 0 0">Warna karakter <span style="opacity:.6">(terlihat oleh pemain lain di Multiplayer)</span></p>
@@ -87,8 +87,8 @@ window.addEventListener('error', function (e) {
           <div class="color-swatch" data-color="#6a5acd" style="background:#6a5acd"></div>
           <div class="color-swatch" data-color="#b22222" style="background:#b22222"></div>
         </div>
-        <button id="btn-guest" class="btn primary" disabled>Play as Guest</button>
-        <button id="btn-google" class="btn" disabled>Continue with Google</button>
+        <button id="btn-guest" class="btn primary" disabled>Main sebagai Tamu</button>
+        <button id="btn-google" class="btn" disabled>Lanjut dengan Google</button>
         <p id="login-status" class="subtitle">Memuat aset…</p>
         <p id="login-error" class="subtitle" style="color:#c44"></p>
       </div>
@@ -96,21 +96,16 @@ window.addEventListener('error', function (e) {
       <div id="menu-screen" data-attr="1" class="screen hidden">
         <div class="fog-layer" aria-hidden="true"></div>
         <h1 class="flicker-title" data-text="LONGWAY">LONGWAY</h1>
-        <p class="subtitle">Don't make a sound.</p>
-        <div class="credits" style="font-size:0.6rem;opacity:.65;max-width:28rem;margin:.4rem auto 0;line-height:1.35;text-align:left">
-          <strong style="opacity:.9">3D Model Credits</strong>
-          <p style="margin:.25rem 0">
-            "<a href="https://sketchfab.com/3d-models/horror-skunx-retexterd-siren-head-updated-bf94583b404349d8bfcd12010ef3522e" target="_blank" rel="noopener">Horror Skunx Retexterd Siren Head [UPDATED]</a>"
-            by <a href="https://sketchfab.com/HorrorBigGameRR" target="_blank" rel="noopener">Horror BigGameRR Green Screens</a>
-            — <a href="http://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.
+        <p class="subtitle">Jangan buat suara.</p>
+        <details class="credits-foot">
+          <summary>Kredit model 3D</summary>
+          <p>
+            <a href="https://sketchfab.com/3d-models/horror-skunx-retexterd-siren-head-updated-bf94583b404349d8bfcd12010ef3522e" target="_blank" rel="noopener">Siren Head</a>
+            — Horror BigGameRR (CC BY 4.0) ·
+            <a href="https://sketchfab.com/3d-models/the-boiled-one-horror-game-boiled-one-64ce66c413fe4e5e92a48e8e02a83590" target="_blank" rel="noopener">Boiled One</a>
+            — MG Rips (CC BY-NC 4.0). Proyek non-komersial.
           </p>
-          <p style="margin:.25rem 0">
-            "<a href="https://sketchfab.com/3d-models/the-boiled-one-horror-game-boiled-one-64ce66c413fe4e5e92a48e8e02a83590" target="_blank" rel="noopener">The Boiled One: Horror Game - Boiled One</a>"
-            by <a href="https://sketchfab.com/MG_GameRips" target="_blank" rel="noopener">MG Rips</a>
-            — <a href="http://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener">CC BY-NC 4.0</a>.
-          </p>
-          <p style="margin:.25rem 0;opacity:.8">Smily: cek atribusi Sketchfab (biasanya CC-BY). Karakter Siren Head ciptaan Trevor Henderson; model Boiled One mungkin rip — hati-hati untuk rilis publik/komersial.</p>
-        </div>
+        </details>
         <p id="menu-player-name" class="subtitle"></p>
         <label class="mode-label">Mode
           <select id="game-mode">
@@ -118,7 +113,11 @@ window.addEventListener('error', function (e) {
             <option value="mission">Misi</option>
             <option value="endless">Tanpa akhir</option>
             <option value="days">Batas hari</option>
+            <option value="shawarma">Shawarma Kiosk (Anomali) — BETA solo</option>
           </select>
+          <p id="shawarma-beta-note" class="subtitle" style="display:none;max-width:22rem;margin:.4rem auto 0;font-size:.8rem;opacity:.85;line-height:1.35">
+            Mode Shawarma masih <b>BETA</b> (solo saja). Masih dalam pengembangan: multiplayer, audio, CCTV, dan balancing belum final.
+          </p>
         </label>
         <label class="mode-label" id="day-limit-wrap">Hari
           <select id="day-limit">
@@ -145,7 +144,7 @@ window.addEventListener('error', function (e) {
         <button id="btn-continue" class="btn" disabled>Continue</button>
         <button id="btn-multi" class="btn">Multiplayer</button>
         <button id="btn-profile" class="btn">Profile</button>
-        <button id="btn-settings" class="btn">Settings</button>
+        <button id="btn-settings" class="btn">Pengaturan</button>
       </div>
 
       <div id="multi-screen" class="screen hidden">
@@ -157,7 +156,7 @@ window.addEventListener('error', function (e) {
             style="text-transform:uppercase;padding:0.5rem;width:min(80vw,200px);background:#111;border:1px solid #444;color:#eee" />
         </label>
         <button id="btn-join" class="btn">Join Room</button>
-        <button id="btn-multi-back" class="btn">Back</button>
+        <button id="btn-multi-back" class="btn">Kembali</button>
       </div>
 
       <div id="lobby-screen" class="screen hidden">
@@ -228,10 +227,11 @@ window.addEventListener('error', function (e) {
       </div>
 
       <div id="settings-screen" class="screen hidden">
-        <h2>Settings</h2>
-        <label>Master Volume <input type="range" id="vol-master" min="0" max="1" step="0.01" value="0.8" /></label>
-        <label>SFX Volume <input type="range" id="vol-sfx" min="0" max="1" step="0.01" value="1" /></label>
-        <label>Music Volume <input type="range" id="vol-music" min="0" max="1" step="0.01" value="0.55" /></label>
+        <h2>Pengaturan</h2>
+        <div class="settings-group">Audio</div>
+        <label>Volume utama <input type="range" id="vol-master" min="0" max="1" step="0.01" value="0.8" /></label>
+        <label>Volume SFX <input type="range" id="vol-sfx" min="0" max="1" step="0.01" value="1" /></label>
+        <label>Volume musik <input type="range" id="vol-music" min="0" max="1" step="0.01" value="0.55" /></label>
         <label>Input Mode
           <select id="input-mode-select">
             <option value="auto">Auto</option>
@@ -240,7 +240,7 @@ window.addEventListener('error', function (e) {
           </select>
         </label>
         <label>Look Sensitivity <input type="range" id="look-sens" min="0.0005" max="0.008" step="0.0001" value="0.0022" /></label>
-        <label><input type="checkbox" id="invert-y" /> Invert Y</label>
+        <label><input type="checkbox" id="invert-y" /> Balik sumbu Y</label>
         <div id="touch-guide" class="hidden">
           <p class="subtitle"><b>Kontrol layar sentuh</b></p>
           <ul class="touch-guide-list">
@@ -254,6 +254,7 @@ window.addEventListener('error', function (e) {
             <li><b>AKSI</b> — interaksi / menolong teman</li>
           </ul>
         </div>
+        <div class="settings-group">Kontrol / Tombol</div>
         <div id="bind-list" class="bind-list">
           <div data-action="forward"><span>Maju</span><button class="btn-bind" type="button">—</button></div>
           <div data-action="back"><span>Mundur</span><button class="btn-bind" type="button">—</button></div>
@@ -270,7 +271,7 @@ window.addEventListener('error', function (e) {
         <button id="btn-ui-layout" class="btn" type="button">Atur Tata Letak UI</button>
         <button id="btn-reset-binds" class="btn" type="button">Reset Keys</button>
         <button id="btn-settings-rotate" class="btn" type="button">Putar layar 90°</button>
-        <button id="btn-settings-back" class="btn">Back</button>
+        <button id="btn-settings-back" class="btn">Kembali</button>
       </div>
 
       <div id="loading-screen" class="screen hidden">
@@ -279,7 +280,7 @@ window.addEventListener('error', function (e) {
       </div>
 
       <div id="gameover-screen" class="screen hidden">
-        <h1 id="go-title">YOU DIED</h1>
+        <h1 id="go-title">KAMU MATI</h1>
         <p id="go-sub" class="subtitle"></p>
         <button id="btn-next-ep" class="btn primary hidden" type="button">Lanjut</button>
         <button id="btn-restart" class="btn primary">Try Again</button>
@@ -295,7 +296,7 @@ window.addEventListener('error', function (e) {
     <button id="bb-close" class="btn" type="button">Close</button>
     <p id="bb-status" class="subtitle"></p>
   </div>
-  <script type="module" src="./js/main.js?v=8.4.1"></script>
+  <script type="module" src="./js/main.js?v=8.6.3"></script>
 <div id="toast" class="hidden" style="position:fixed;bottom:12%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#eee;padding:.6rem 1.2rem;border-radius:6px;z-index:10000;font-size:.9rem;max-width:90%;text-align:center"></div>
 
   <div id="pause-overlay" class="screen hidden" style="z-index:55;background:rgba(0,0,0,.72)">

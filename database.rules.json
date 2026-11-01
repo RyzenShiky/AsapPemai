@@ -135,7 +135,8 @@
         },
         "pickupClaims": {
           "$uid": {
-            ".write": "auth != null && auth.uid === $uid && root.child('rooms/'+$roomCode+'/players').child(auth.uid).exists()"
+            ".write": "auth != null && auth.uid === $uid && root.child('rooms/'+$roomCode+'/players').child(auth.uid).exists()",
+            ".validate": "newData.hasChildren(['pickupId','t']) && newData.child('pickupId').isString() && newData.child('pickupId').val().length < 40"
           }
         },
         "pick": {
@@ -152,7 +153,7 @@
           ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid && !newData.exists()",
           "$uid": {
             ".write": "auth != null && auth.uid === $uid && root.child('rooms/'+$roomCode+'/players').child(auth.uid).exists()",
-            ".validate": "newData.hasChildren(['k','n','t'])"
+            ".validate": "newData.hasChildren(['k','n','t']) && (newData.child('k').val() === 'serve' || newData.child('k').val() === 'reject') && (!newData.hasChild('id') || (newData.child('id').isString() && newData.child('id').val().length <= 40))"
           }
         },
         "doors": {
@@ -176,7 +177,8 @@
             ".write": "auth != null && !data.exists() && root.child('rooms/'+$roomCode+'/players').child(auth.uid).exists()",
             ".validate": "newData.hasChildren(['uid','name','text','t']) && newData.child('uid').val() === auth.uid && newData.child('text').isString() && newData.child('text').val().length <= 120 && newData.child('name').isString() && newData.child('name').val().length <= 16 && newData.child('t').isNumber()"
           }
-        }
+        },
+        ".validate": "$roomCode.matches(/^[A-Z0-9]{4,12}$/)"
       }
     }
   }

@@ -9,8 +9,8 @@ const rnd = (a, b) => {
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const GAP = [12, 25];
-const RECYCLE_DIST = 90;
-const RECYCLE_COOLDOWN = 25;
+const RECYCLE_DIST = 160;
+const RECYCLE_COOLDOWN = 90;
 
 function pickSpawn(players) {
   if (!players.length) return null;
@@ -95,7 +95,8 @@ export function updateSchedule(state, players, dayP, dayIndex, alwaysAll = false
       const far = players.every(
         (q) => Math.hypot(q.x - m.position.x, q.z - m.position.z) > RECYCLE_DIST
       );
-      if (far && !busy && now >= (m._recycleAt || 0)) {
+      const cfg = MONSTER_TYPES[ROSTER[i]] || {};
+      if (far && !busy && (cfg.h || 0) <= 10 && now >= (m._recycleAt || 0)) { // raksasa (Siren) jangan di-teleport
         const p = state._spawnFn ? state._spawnFn(players) : null;
         if (p) {
           Object.assign(m.position, p);

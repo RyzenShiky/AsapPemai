@@ -284,10 +284,16 @@ export class MultiplayerRoom {
   }
 
   /** Client-owned fields only; host also writes own health/alive. Uses update() so host damage is not clobbered. */
-  respawnSelf() {
+  resetGame() {
+    if (!this.isHost) return Promise.resolve();
+    return update(ref(this.db, `rooms/${this.code}/game`), { gameOver: false, win: false, deaths: 0 });
+  }
+
+  respawnSelf(spawn) {
+    const s = spawn || { x: 0, z: 8 };
     return update(ref(this.db, `rooms/${this.code}/players/${this.uid}`), {
       alive: true, isDowned: false, health: 100, downedTimer: 0,
-      x: 0, y: 1.7, z: 8 + Math.random() * 2,
+      x: s.x + (Math.random() - 0.5) * 2, y: 1.7, z: s.z + (Math.random() - 0.5) * 2,
     });
   }
 

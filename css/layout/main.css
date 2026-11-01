@@ -1,4 +1,4 @@
-#app { position: relative; width: 100vw; height: 100vh; }
+#app{width:100vw;height:100dvh;height:100vh;position:relative;overflow:hidden}
 #ui-root { position: absolute; inset: 0; pointer-events: none; }
 #ui-root .screen, #ui-root button, #ui-root input, #ui-root select { pointer-events: auto; }
 .screen {

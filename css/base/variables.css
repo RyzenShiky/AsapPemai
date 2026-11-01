@@ -5,3 +5,28 @@
   --color-muted: #6b6560;
   --font-title: Georgia, serif;
 }
+
+
+/* UI polish tokens (v8.6.3) */
+:root {
+  color-scheme: dark;
+  --text: #e8e0d5;
+  --text-dim: #a39a90;
+  --accent: #c0392b;
+  --accent-deep: #8b0000;
+  --surface: #120d0d;
+  --line: #3a2e2e;
+  --fs-xs: .75rem;
+  --fs-sm: .875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.25rem;
+  --fs-title: clamp(2.2rem, 6vw, 3.5rem);
+  --z-hud: 10;
+  --z-screen: 30;
+  --z-modal: 50;
+  --z-toast: 60;
+  --z-fatal: 100;
+  --tap: 44px;
+  --danger-op: rgba(192, 57, 43, 0.35);
+  --color-muted: #8a827a; /* ~4.5:1 on near-black */
+}
