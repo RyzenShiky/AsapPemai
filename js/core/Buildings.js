@@ -5,7 +5,11 @@ const WALL_T = 0.35;
 /** Billboard facing road. */
 export const WALLS = [];
 export const DOORS = [];
-export const setDoor = (d, open) => { d.open = open; if (d.col) d.col.type = open ? 'door-open' : 'wall'; };
+export const setDoor = (d, open) => {
+  if (d.broken) open = true; // broken doors stay open (no invisible wall)
+  d.open = open;
+  if (d.col) d.col.type = open ? 'door-open' : 'wall';
+};
 
 export function camsFor(def) {
   const { x, z, w, d, h, door } = def;
@@ -90,6 +94,8 @@ export function breakWall(c) {
 export function resetWalls() {
   for (const c of WALLS) c.type = 'wall';
   for (const b of BUILDING_DEFS) { b.breached = false; b.brokenWalls = 0; }
+  // restore doors (do not wipe DOORS array — rebuild is separate)
+  for (const d of DOORS) { d.broken = false; setDoor(d, false); }
 }
 
 export function allBuildingColliders() {

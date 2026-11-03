@@ -24,3 +24,16 @@ This build is intended for **private / non-commercial testing** until:
 3. Firebase App Check is enabled and rules are deployed from this file.
 
 See also README § Assets.
+
+
+## Smily
+"Smily horror monster" by Bento (gostbento) — CC BY 4.0
+https://sketchfab.com/3d-models/smily-horror-monster-3d3fc31eddaa409a8f2df564823154e1
+Modified (compressed/scaled if applicable).
+
+
+## Survivor (uji privat)
+"Harry Potter (rigged) Character" listing by RRB STUDIOS — CC BY 4.0 on Sketchfab.
+Character IP belongs to franchise holders; do not ship publicly without clearance.
+
+License text: https://creativecommons.org/licenses/by/4.0/

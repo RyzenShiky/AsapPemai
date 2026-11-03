@@ -95,6 +95,18 @@
             ".validate": "newData.hasChildren(['type','x','z','yaw'])",
             "driver": {
               ".validate": "!newData.exists() || (newData.isString() && (newData.val() === auth.uid || root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid))"
+            },
+            "fuel": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+            },
+            "temp": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 200"
+            },
+            "rpm": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 12000"
+            },
+            "gear": {
+              ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 5"
             }
           }
         },
@@ -160,13 +172,15 @@
           "$id": {
             ".write": "auth != null && root.child('rooms/'+$roomCode+'/players').child(auth.uid).exists()",
             ".validate": "newData.isBoolean()"
-          }
+          },
+          ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid"
         },
         "doorsBroken": {
           "$id": {
             ".write": "auth != null && root.child('rooms/'+$roomCode+'/players').child(auth.uid).exists()",
             ".validate": "newData.isBoolean() || newData.isNumber()"
-          }
+          },
+          ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid"
         },
         "billboard": {
           ".write": "auth != null && root.child('rooms/'+$roomCode+'/meta/hostUid').val() === auth.uid",

@@ -10,7 +10,7 @@ import { MonsterController } from './gameplay/Monster.js';
 import { nearestMonsterDist, heartFromDistance } from './gameplay/Proximity.js';
 import { LANDMARKS } from './core/WorldConfig.js';
 import { DAY_SECONDS, MATCH_SECONDS, phaseFromProgress, lightingForProgress, randomMonsterSpawn } from './core/DayCycle.js';
-import { ITEMS, RECIPES, SHOP, MAX_SLOTS, MAX_WEIGHT, canCraft, canCarry, invWeight, rollLoot, sellPrice, addItem, removeItems, countOf, NO_SELL } from './gameplay/Items.js';
+import { ITEMS, RECIPES, SHOP, MAX_SLOTS, MAX_WEIGHT, canCraft, canCarry, invWeight, weightOf, rollLoot, sellPrice, addItem, removeItems, countOf, NO_SELL } from './gameplay/Items.js';
 import { Mission, Tutorial, Subtitles, MISSIONS, validateAnchors, STORY, chapterByKey, nextChapter } from './gameplay/Mission.js';
 import { PickOne } from './gameplay/PickOne.js';
 import { Shawarma } from './gameplay/Shawarma.js';
@@ -21,14 +21,15 @@ import { JumpscareManager } from './gameplay/Jumpscare.js';
 import { PacingDirector } from './core/PacingDirector.js';
 import { WorldDirector } from './core/WorldDirector.js';
 import { WeatherController } from './core/Weather.js';
+import { DisasterDirector, disasterSeed } from './core/Disaster.js';
 import { updateSchedule } from './core/MonsterSchedule.js';
 import { ROSTER, MAX_PLAYERS, applyBackroomsMonsters } from './core/MonsterTypes.js';
 import { LevelManager, LEVELS } from './core/Level.js';
 import { weatherMul, weatherSpeed, weatherVis } from './core/Weather.js';
 import { DreadSequencer } from './audio/DreadSequencer.js';
 import { installSecretCodes } from './input/SecretCode.js';
-import { VehicleController, findDismountSpot } from './gameplay/Vehicle.js';
-import { MultiplayerRoom, roomCode as genRoomCode, initFirebase, deviceUid, uploadBillboardMedia, ensureAuthUid } from './net/firebase.js';
+import { VehicleController, findDismountSpot, SPEC } from './gameplay/Vehicle.js';
+import { MultiplayerRoom, roomCode as genRoomCode, initFirebase, deviceUid, ensureAuthUid } from './net/firebase.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Renderer } from './renderer/Renderer.js';
 import { TouchControls } from './input/TouchControls.js';
@@ -40,6 +41,7 @@ import {
 
 let renderer, player, monsters, audio, clock, state, colliders, touch;
 let running = false;
+let disaster = null, dzClock = 0;
 let room = null;
 let mission = null, tutorial = null, subs = null, pickOne = null, shawarma = null;
 let missionKey = 'world';
@@ -88,6 +90,26 @@ async function imageToDataUrl(file, max = 768) {
   return url;
 }
 
+const wantsBatteryItem = () => !!mission?.def?.steps?.slice(mission.s?.step || 0).some((st) => st.item === 'battery');
+const lootSeed = (pk) => Math.round((pk.x || 0) * 7 + (pk.z || 0) * 13);
+function pickupList(pk) {
+  if (pk.kind === 'container') return rollLoot(pk.table || 'house', lootSeed(pk));
+  if (pk.type === 'battery') return wantsBatteryItem() ? ['battery'] : [];
+  return pk.type ? [pk.type] : [];
+}
+let _fullToastAt = 0;
+function fitsPickup(pk) {
+  const inv = state?.data?.inventory, list = pickupList(pk);
+  if (!inv || !list.length) return true;
+  const ok = inv.items.length + list.length <= MAX_SLOTS
+    && invWeight(inv) + list.reduce((a, t) => a + weightOf(t), 0) <= MAX_WEIGHT;
+  if (!ok && performance.now() - _fullToastAt > 2500) {
+    _fullToastAt = performance.now();
+    try { toast?.('Tas penuh — buang/pakai sesuatu dulu'); } catch (e) { /* */ }
+  }
+  return ok;
+}
+
 function givePickupItem(pk, id = '') {
   const p = state.data.player;
   const inv = (state.data.inventory ??= { slots: MAX_SLOTS, items: [] });
@@ -117,6 +139,7 @@ function givePickupItem(pk, id = '') {
     return;
   }
   if (pk.type === 'battery') {
+    if (wantsBatteryItem() && addItem(p, state.data.inventory, 'battery')) return;
     p.battery = Math.min(100, (p.battery ?? 100) + 40);
     return;
   }
@@ -188,25 +211,19 @@ async function init() {
     if (!file) { if (st) st.textContent = 'Pilih file dulu'; return; }
     if (file.size > 4 * 1024 * 1024) { if (st) st.textContent = 'Max 4MB'; return; }
     try {
-      if (st) st.textContent = 'Uploading…';
-      const code = room?.code || 'solo';
+      if (st) st.textContent = 'Memproses…';
       if (room && !room.isHost) {
         if (st) st.textContent = 'Hanya host yang boleh upload';
         return;
       }
       const isVideo = file.type === 'video/mp4', isImage = file.type.startsWith('image/');
       if (!isVideo && !isImage) { if (st) st.textContent = 'Hanya gambar atau MP4'; return; }
-      const type = isVideo ? 'video' : 'image';
       if (isVideo) {
-        if (!room) { if (st) st.textContent = 'Video billboard hanya di multiplayer + Storage'; return; }
-        try {
-          const url = await uploadBillboardMedia(file, code);
-          await room.setBillboard(url, 'video');
-          if (st) st.textContent = 'OK (video)';
-        } catch (e) {
-          if (st) st.textContent = 'Video gagal — Storage belum aktif / berbayar. Pakai gambar JPEG.';
-          throw e;
-        }
+        const url = window.prompt('Tempel URL langsung file MP4 (https, tanpa Firebase Storage)');
+        if (!url || !/^https:\/\/.+\.mp4(\?.*)?$/i.test(url)) { if (st) st.textContent = 'URL MP4 https tidak valid'; return; }
+        if (room) await room.setBillboard(url, 'video');
+        else renderer?.applyBillboardMedia({ url, type: 'video' }, audio);
+        if (st) st.textContent = 'OK (video via URL)';
       } else {
         const url = await imageToDataUrl(file);
         if (room) await room.setBillboard(url, 'image');
@@ -215,7 +232,7 @@ async function init() {
       }
     } catch (e) {
       console.error(e);
-      if (st && !st.textContent.includes('Storage')) st.textContent = e.message || 'Upload gagal';
+      if (st) st.textContent = e.message || 'Upload gagal';
     }
   });
   {
@@ -268,6 +285,8 @@ function refreshContinueBtn() {
 }
 
 function enterMenu() {
+  try { document.getElementById('veh-hud')?.classList.add('hidden'); } catch (e) { /* */ }
+  
   const pj = sessionStorage.getItem('pendingJoin');
   if (!pj) sessionStorage.removeItem('joinTried');
   if (pj) {
@@ -318,7 +337,7 @@ async function setupLocalGame(fromSave = false) {
 
   const MONSTER_COUNT = ROSTER.length;
   state._level = level || null;
-  if (!resumed) { try { resetWalls(); } catch (e) { /* */ } renderer?.resetWalls?.(); }
+  if (!resumed) { try { resetWalls(); } catch (e) { /* */ } renderer?.resetWalls?.(); room?.resetDoors?.(); }
   state._wallFx = (c, dx, dz) => {
     if (!breakWallCol(c)) return;
     renderer?.breakWall(c.bid, c.side, c.i, dx, dz);
@@ -340,6 +359,7 @@ async function setupLocalGame(fromSave = false) {
     : null;
   if (level) Object.assign(state.data.player.position, { x: level.def.start?.x ?? 1.5, y: 1.7, z: level.def.start?.z ?? 7.5 });
   state._spawn = { x: state.data.player.position.x, z: state.data.player.position.z };
+  if (renderer) renderer.camColliders = colliders;
   state._multi = mode === 'multi';
   if (level?.def.pickups && !resumed) state.data.pickups = level.def.pickups();
   while (state.data.monsters.length < MONSTER_COUNT) {
@@ -400,7 +420,8 @@ async function setupLocalGame(fromSave = false) {
     const modeEl = document.getElementById('game-mode');
     const dayEl = document.getElementById('day-limit');
     const gm = modeEl?.value;
-    state.data.world.gameMode = ['days', 'mission', 'story'].includes(gm) ? gm : 'endless';
+  state.data.world.gameMode = ['days', 'mission', 'story'].includes(gm) ? gm : 'endless';
+  state.data.world.disasterMode = gm === 'disaster';
     state.data.world.dayLimit = Math.max(1, parseInt(dayEl?.value || '3', 10) || 3);
     if (room?.isHost) room.cfg = { mode: state.data.world.gameMode, dayLimit: state.data.world.dayLimit };
     state.data.world.daysSurvived = 0;
@@ -418,6 +439,7 @@ async function setupLocalGame(fromSave = false) {
   worldDirector = null;
   hallu = null;
   weatherCtrl = new WeatherController();
+  disaster?.dispose(); disaster = null; dzClock = 0;
   hearingMask = 1;
   vehicleControllers = [];
   state.data.vehicles = [];
@@ -429,7 +451,7 @@ async function setupLocalGame(fromSave = false) {
   const wantSh = mode !== 'multi' && document.getElementById('game-mode')?.value === 'shawarma'; // multi dimatikan (BETA)
   shawarma = wantSh && !resumed ? new Shawarma({ room: mode === 'multi' ? room : null, state, renderer, audio }) : null;
   if (shawarma) {
-    state.data.world.gameMode = 'endless';
+  state.data.world.gameMode = 'endless';
     state._pickOneOn = true;
     try { shawarma.hostBegin(); } catch (e) { console.warn(e); }
     try { toast('Shawarma Kiosk — BETA (solo). Masih dikembangkan.', 4500); } catch (e) { /* */ }
@@ -767,7 +789,7 @@ function missionIO() {
     loot: (item, from) => {
       let best = null, bd = Infinity;
       for (const pk of Object.values(state.data.pickups || {})) {
-        if (pk.taken || !(pk.type === item || pk.kind === 'container')) continue;
+        if (pk.taken || !(pk.type === item || (pk.kind === 'container' && rollLoot(pk.table || 'house', lootSeed(pk)).includes(item)))) continue;
         const d = Math.hypot(pk.x - from.x, pk.z - from.z);
         if (d < bd) { bd = d; best = pk; }
       }
@@ -1079,7 +1101,7 @@ function wireUI(canvas) {
         }
       }
     }
-    if (e.code === 'Enter' && running && i && document.activeElement !== i) {
+    if (e.code === 'Enter' && running && !shawarma && i && document.activeElement !== i) {
       e.preventDefault();
       openChat();
     }
@@ -1116,6 +1138,17 @@ function wireUI(canvas) {
     const inv = document.getElementById('invert-y');
     if (inv) inv.checked = localStorage.getItem('longway_invertY') === '1';
   });
+  document.getElementById('reduce-motion')?.addEventListener('change', (e) => {
+    const on = !!e.target.checked;
+    try { localStorage.setItem('longway_reduce_motion', on ? '1' : '0'); } catch (err) { /* */ }
+    document.documentElement.classList.toggle('reduce-motion', on);
+  });
+  try {
+    if (localStorage.getItem('longway_reduce_motion') === '1') {
+      document.documentElement.classList.add('reduce-motion');
+      const rm = document.getElementById('reduce-motion'); if (rm) rm.checked = true;
+    }
+  } catch (err) { /* */ }
   document.getElementById('btn-settings-back').addEventListener('click', () => {
     document.getElementById('settings-screen').classList.add('hidden');
     if (settingsFromGame) {
@@ -1342,6 +1375,7 @@ function wireUI(canvas) {
 }
 
 async function exitToMenu() {
+  try { disaster?.dispose(); disaster = null; } catch (e) { /* */ }
   running = false;
   paused = false;
   audio?.stopMusic?.(1);
@@ -1630,21 +1664,43 @@ function spawnDefaultVehicles() {
   if (renderer) renderer.syncVehicles(vehicleControllers);
 }
 
+const vh = {};
+function updateVehHud(v) {
+  const g = (id) => (vh[id] ||= document.getElementById(id)), root = g('veh-hud');
+  if (!root) return;
+  if (!v) return root.classList.add('hidden');
+  const S = SPEC[v.type] || SPEC.motor;
+  root.classList.remove('hidden');
+  if (g('vh-kmh')) g('vh-kmh').textContent = Math.round(Math.abs(v.speed) * 3.6);
+  if (g('vh-gear')) g('vh-gear').textContent = v.stalled ? '–' : v.speed < -0.3 ? 'R' : Math.abs(v.speed) < 0.3 ? 'N' : v.gear;
+  if (g('vh-rpm-txt')) g('vh-rpm-txt').textContent = Math.round((v.rpm || 0) / 50) * 50;
+  const r = Math.min(1, (v.rpm || 0) / S.redline), f = (v.fuel ?? S.tank) / S.tank, t = Math.min(1, Math.max(0, ((v.temp || 30) - 30) / 100));
+  if (g('vh-rpm-fill')) Object.assign(g('vh-rpm-fill').style, { width: r * 100 + '%', background: r > 0.9 ? '#f55' : '#6cf' });
+  if (g('vh-fuel-fill')) Object.assign(g('vh-fuel-fill').style, { width: f * 100 + '%', background: f < 0.15 ? '#f55' : '#9d6' });
+  if (g('vh-temp-fill')) Object.assign(g('vh-temp-fill').style, { width: t * 100 + '%', background: v.temp > 110 ? '#f55' : v.temp > 100 ? '#fa4' : '#6cf' });
+  if (g('vh-fuel-txt')) g('vh-fuel-txt').textContent = (v.fuel ?? 0).toFixed(0) + ' L';
+  if (g('vh-temp-txt')) g('vh-temp-txt').textContent = Math.round(v.temp || 30) + '°C';
+  const msg = (v.fuel ?? 1) <= 0 ? 'Bensin habis' : v.stalled ? 'Mesin overheat, tunggu dingin' : (v.temp || 0) > 110 ? 'Suhu mesin tinggi!' : f < 0.15 ? 'Bensin menipis' : '';
+  if (g('vh-warn')) { g('vh-warn').textContent = msg; g('vh-warn').classList.toggle('hidden', !msg); }
+}
 function spawnVehicle(type) {
   if (!state || !player) return;
-  const p = state.data.player.position;
-  const yaw = state.data.player.rotation.yaw;
-  const pos = {
-    x: p.x - Math.sin(yaw) * 4,
-    y: 0,
-    z: p.z - Math.cos(yaw) * 4,
-  };
-  const v = new VehicleController(type, pos);
-  v.ownerUid = room?.uid || deviceUid();
-  if (!state.data.vehicles) state.data.vehicles = [];
-  state.data.vehicles.push(v);
-  vehicleControllers.push(v);
-  if (renderer) renderer.syncVehicles(state.data.vehicles);
+  const p = state.data.player, me = room?.uid || (typeof deviceUid === 'function' ? deviceUid() : 'local');
+  if (p.ridingVehicleId) return toast?.('Turun dulu');
+  if (Date.now() - (spawnVehicle._last || 0) < 5000) return toast?.('Tunggu sebentar');
+  const mine = vehicleControllers.filter((v) => v.type === type && v.ownerUid === me && !v.remote);
+  if (mine.length >= 2) {
+    const old = mine.find((v) => !v.driverUid && !(v.passengerUids || []).length);
+    if (!old) return toast?.('Kendaraan masih dipakai');
+    vehicleControllers.splice(vehicleControllers.indexOf(old), 1);
+    room?.removeVehicle?.(old.id);
+  }
+  spawnVehicle._last = Date.now();
+  const yaw = p.rotation.yaw;
+  const v = new VehicleController(type, { x: p.position.x - Math.sin(yaw) * 4, y: 0, z: p.position.z - Math.cos(yaw) * 4 });
+  v.ownerUid = me;
+  vehicleControllers.push(v); state.data.vehicles = vehicleControllers;
+  if (renderer) renderer.syncVehicles(vehicleControllers);
 }
 
 function tryVehicleInteract() {
@@ -1669,6 +1725,17 @@ function tryVehicleInteract() {
     return;
   }
   if (!player.keys.has(binds.interact)) player._eLatch = false;
+  if (player.keys.has(binds.refuel) && !player._rLatch) {
+    player._rLatch = true;
+    const vv = (state.data.vehicles || []).find((x) => Math.hypot(x.position.x - p.position.x, x.position.z - p.position.z) < 3.5);
+    const S = SPEC[vv?.type];
+    if (vv && S && !vv.driverUid && !vv.remote) {
+      if (vv.fuel > S.tank - 15) toast?.('Tangki hampir penuh');
+      else if (removeItems(p, state.data.inventory, 'fuel', 1)) { vv.fuel = Math.min(S.tank, vv.fuel + 20); toast?.('Bensin +20 L'); }
+      else toast?.('Butuh jerigen bensin');
+    }
+  }
+  if (!player.keys.has(binds.refuel)) player._rLatch = false;
   if (p.ridingVehicleId) return;
   if (!player.keys.has(binds.interact) || player._eLatch) return;
   for (const v of state.data.vehicles || []) {
@@ -1740,7 +1807,7 @@ function startLoop() {
           let left = Math.min(raw, 0.12);
           while (left > 1e-4) {
             const h = Math.min(left, 1 / 30);
-            v.driveUpdate(h, player.keys, colliders, state, audio, v.driverUid || myUid);
+            v.driveUpdate(h, player.keys, colliders, state, audio, v.driverUid || myUid); /* engine */
             left -= h;
           }
         }
@@ -1763,6 +1830,15 @@ function startLoop() {
     // Sync vehicle data objects with controllers
     state.data.vehicles = vehicleControllers;
     if (renderer) renderer.syncVehicles(vehicleControllers);
+    for (const v of vehicleControllers) {
+      if (v.remote) continue;
+      const driven = state.data.player.ridingVehicleId === v.id && state.data.player.ridingRole === 'driver';
+      if (!driven) v.parkedTick?.(dt);
+    }
+    {
+      const pl = state.data.player;
+      updateVehHud(pl.ridingVehicleId && pl.ridingRole === 'driver' ? state.getVehicle?.(pl.ridingVehicleId) || vehicleControllers.find((x) => x.id === pl.ridingVehicleId) : null);
+    }
 
     // Remote vehicles (non-host)
     if (room && room.remoteVehicles) {
@@ -1790,6 +1866,7 @@ function startLoop() {
         v.driverUid = rv.driver;
         v.passengerUids = rv.passengers || [];
         v.speed = rv.speed || 0;
+        v.fuel = rv.fuel ?? v.fuel; v.temp = rv.temp ?? v.temp; v.rpm = rv.rpm || 0; v.gear = rv.gear || 1;
         list.push(v);
       }
       if (renderer) renderer.syncVehicles(vehicleControllers);
@@ -1988,7 +2065,7 @@ function startLoop() {
     // --- Day cycle (loops). Endless or win after N days. ---
     const gs = room?.gameStatus;
     if (gs?.dayLimit && room && !room.isHost) {
-      state.data.world.gameMode = gs.mode;
+  state.data.world.gameMode = gs.mode;
       state.data.world.dayLimit = gs.dayLimit;
     }
     const daySec = state.data.world.daySeconds || DAY_LEN;
@@ -2059,6 +2136,19 @@ function startLoop() {
     // Keep max 1 monster
     
     
+    if (state.data.world.disasterMode && !shawarma && !level) {
+      dzClock += dt;
+      const t0 = room?.gameStatus?.t0;
+      if (!disaster && (mode === 'solo' || t0)) {
+        disaster = new DisasterDirector({
+          state, renderer, audio, toast, touch: typeof isTouchDevice === 'function' ? isTouchDevice() : false,
+          authority: mode === 'solo' || !!room?.isHost,
+          seed: disasterSeed(room?.code, mode === 'solo' ? Date.now() : t0),
+          getTime: () => (mode === 'solo' ? dzClock : (room.serverNow() - t0) / 1000),
+        });
+      }
+      disaster?.update(dt, now);
+    }
     // Dynamic weather (host authority in multi) — clear/rain/fog/storm + lightning
     if (!shawarma) {
       if (mode === 'solo' || (room && room.isHost)) {
@@ -2129,7 +2219,7 @@ function startLoop() {
       if (mode === 'solo' || room?.isHost) {
         let dirty = false;
         for (const pk of Object.values(pickups)) {
-          if (pk.taken || !pickupReady(pk) || !near(pk, pp.x, pp.z, 1.8)) continue;
+          if (pk.taken || !pickupReady(pk) || !near(pk, pp.x, pp.z, 1.8) || !fitsPickup(pk)) continue;
           pk.taken = true;
           pk.takenBy = room?.uid || 'local';
           givePickupItem(pk);
@@ -2149,7 +2239,7 @@ function startLoop() {
       } else if (room) {
         const t = performance.now();
         for (const [id, pk] of Object.entries(room.remotePickups || {})) {
-          if (!pk.taken && pickupReady(pk) && near(pk, pp.x, pp.z, 1.8) && t - (claimedPickups.get(id) || 0) > 2000) {
+          if (!pk.taken && pickupReady(pk) && near(pk, pp.x, pp.z, 1.8) && t - (claimedPickups.get(id) || 0) > 2000 && fitsPickup(pk)) {
             claimedPickups.set(id, t);
             room.claimPickup(id);
           }

@@ -60,7 +60,7 @@ html, body, #app { width: 100%; height: 100vh; height: 100dvh; }
 /* Landscape phone / tablet */
 @media screen and (orientation: landscape) and (max-height: 500px) {
   .screen h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
-  .screen { gap: 0.45rem; padding: 0.5rem; justify-content: center; }
+  .screen { gap: 0.45rem; padding: 0.5rem; justify-content: flex-start; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .subtitle { margin-bottom: 0.35rem; font-size: 0.85rem; }
   .btn {
     min-width: 0;
@@ -205,3 +205,17 @@ body { font-family: var(--font-ui); }
 #gameover-screen { animation: uiFadeIn .9s ease both; }
 @keyframes uiFadeIn { from { opacity: 0; } to { opacity: 1; } }
 #go-title { letter-spacing: .3em; color: #e0584c; text-shadow: 0 0 40px rgba(214,69,58,.5); }
+
+
+/* v8.6.4 menu scroll landscape — last wins */
+@media screen and (orientation: landscape) {
+  .screen {
+    justify-content: flex-start !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    padding: max(0.35rem, env(safe-area-inset-top)) 0.5rem max(0.35rem, env(safe-area-inset-bottom)) !important;
+  }
+  .screen > .fog-layer + * { margin-top: auto; }
+  .screen > :last-child { margin-bottom: auto; }
+  .screen h1 { margin-top: 0.25rem; }
+}

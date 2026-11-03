@@ -19,6 +19,10 @@ function distXZ(a, b) {
 }
 
 /** GLB forward = +Z, game forward movement = -Z */
+export const SPEC = {
+  motor: { tank: 15, burn: 0.03, idleRpm: 1300, redline: 9500, gears: 4 },
+  mobil: { tank: 45, burn: 0.05, idleRpm: 800, redline: 6500, gears: 5 },
+};
 export const VEHICLE_FACE = Math.PI;
 
 export function seatToWorld(v, s) {
@@ -42,6 +46,8 @@ export class VehicleController {
     this.passengerUids = [];
     this.speed = 0;
     this.targetSpeed = 0;
+    this.fuel = (SPEC[type] || SPEC.motor).tank;
+    this.temp = 30; this.rpm = 0; this.gear = 1; this.stalled = false;
     this.crashShake = 0;
     this.seatOffsets = SEAT_DEFAULTS[type] || SEAT_DEFAULTS.motor;
   }
@@ -109,11 +115,14 @@ export class VehicleController {
     const maxSpd = this.type === 'motor' ? 13 : 18;
     const turnRate = this.type === 'motor' ? 1.8 : 1.0;
 
-    this.targetSpeed = throttle * maxSpd;
-    this.speed += (this.targetSpeed - this.speed) * Math.min(1, 3 * dt);
+    const derate = this.temp > 110 ? Math.max(0.35, 1 - (this.temp - 110) / 25) : 1;
+    const thr = this.stalled ? 0 : throttle;
+    this.targetSpeed = (thr > 0 ? thr * maxSpd : thr * maxSpd * 0.25) * derate;
+    this.speed += (this.targetSpeed - this.speed) * Math.min(1, (this.stalled ? 0.8 : 3) * dt);
+    this.tickEngine(dt, thr, maxSpd);
     if (Math.abs(this.speed) > 0.3) {
       this._steer = (this._steer || 0) + (turn - (this._steer || 0)) * Math.min(1, 8 * dt);
-      const rate = turnRate * (1 - 0.45 * Math.min(1, Math.abs(this.speed) / maxSpd));
+      const rate = turnRate * (1 - 0.45 * Math.min(1, Math.abs(this.speed) / maxSpd)) * Math.min(1, Math.abs(this.speed) / 3);
       this.rotation.yaw += this._steer * rate * dt * Math.sign(this.speed || 1);
     }
 
@@ -139,6 +148,7 @@ export class VehicleController {
     if (head > 0.35 && Math.abs(this.speed) > 5 && this._crashCd <= 0) {
       this._crashCd = 0.6;
       this.crashShake = Math.min(1, Math.abs(this.speed) / 10 + 0.4);
+      this.temp += 8;
       this.speed *= 1 - 0.6 * head;
       state.emitSound({
         position: { ...this.position },
@@ -166,6 +176,26 @@ export class VehicleController {
   }
 
   /** High-speed hit stuns monster; low-speed hurts rider (with cooldown). */
+  tickEngine(dt, thr, maxSpd) {
+    const S = SPEC[this.type] || SPEC.motor;
+    const ratio = Math.min(1, Math.abs(this.speed) / maxSpd);
+    const g = Math.min(S.gears, 1 + Math.floor(ratio * S.gears * 0.999));
+    const inGear = (ratio - (g - 1) / S.gears) * S.gears;
+    const load = Math.max(Math.abs(thr), 0.25), run = !this.stalled;
+    const tgt = run ? S.idleRpm + (S.redline - S.idleRpm) * Math.min(1, (0.15 + 0.85 * inGear) * (0.45 + 0.55 * load)) : 0;
+    this.rpm += (tgt - this.rpm) * Math.min(1, 6 * dt);
+    this.gear = g;
+    if (run) this.fuel = Math.max(0, this.fuel - S.burn * (0.1 + 0.9 * load * (this.rpm / S.redline)) * dt);
+    const rr = Math.max(0, (this.rpm - S.idleRpm) / (S.redline - S.idleRpm));
+    const heat = run ? 1.5 + 7 * rr * load : 0;
+    const cool = (0.03 + 0.06 * ratio) * (this.temp - 30);
+    this.temp = Math.max(30, this.temp + (heat - cool) * dt);
+    this.stalled = this.fuel <= 0 || (this.stalled ? this.temp >= 95 : this.temp >= 125);
+  }
+  parkedTick(dt) {
+    this.rpm += -this.rpm * Math.min(1, 6 * dt);
+    this.temp = Math.max(30, this.temp - 0.03 * (this.temp - 30) * dt);
+  }
   checkMonsterHits(monsters, now, applyDamageToRiders) {
     for (const m of monsters) {
       if (!m || m.active === false) continue;

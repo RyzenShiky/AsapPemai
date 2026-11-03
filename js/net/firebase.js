@@ -3,9 +3,6 @@ import {
   getDatabase, ref, set, update, onValue, onDisconnect, get, remove, push, onChildAdded, query, limitToLast,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js';
 import {
-  getStorage, ref as sRef, uploadBytes, getDownloadURL,
-} from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-storage.js';
-import {
   getAuth, signInAnonymously, initializeAuth,
   indexedDBLocalPersistence, browserLocalPersistence,
   browserSessionPersistence, inMemoryPersistence,
@@ -74,22 +71,7 @@ export async function ensureAuthUid(ms = 20000) {
   }
 }
 
-export function getStorageRef() {
-  if (!app) initFirebase();
-  return getStorage(app);
-}
 
-export async function uploadBillboardMedia(file, roomCode) {
-  const { getStorage, ref: sref, uploadBytes, getDownloadURL } = await import('https://www.gstatic.com/firebasejs/11.0.0/firebase-storage.js');
-  const storage = getStorage();
-  const uid = (await ensureAuthUid(8000).catch(() => null)) || 'anon';
-  const safe = String(file.name || 'media').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 48);
-  const room = String(roomCode || 'solo').replace(/[^A-Za-z0-9_]/g, '').slice(0, 16) || 'solo';
-  const path = `billboard/${room}/${uid}/${Date.now()}_${safe}`;
-  const r = sref(storage, path);
-  await uploadBytes(r, file, { contentType: file.type || 'application/octet-stream' });
-  return getDownloadURL(r);
-}
 
 /** Local-only fallback id (solo / offline). Prefer ensureAuthUid for multiplayer. */
 export function deviceUid() {
@@ -230,30 +212,45 @@ export class MultiplayerRoom {
   }
 
   _listen() {
-    const root = ref(this.db, `rooms/${this.code}`);
-    const unsub = onValue(root, (snap) => {
-      const v = snap.val() || {};
-      this.remotePlayers = v.players || {};
-      this.remoteMonsters = v.monster || {};
-      this.remoteSounds = v.soundEvents
-        ? Object.values(v.soundEvents).flatMap((s) => (s.list || []).map((e) => ({ ...e, by: s.by, t: e.id })))
+    const base = `rooms/${this.code}`;
+    const bump = () => { if (typeof this.onUpdate === 'function') this.onUpdate(); };
+    const sub = (path, apply) => {
+      const unsub = onValue(ref(this.db, `${base}/${path}`), (snap) => {
+        apply(snap.val());
+        bump();
+      });
+      this.unsubs.push(() => unsub());
+    };
+    // Split listeners: avoid re-downloading entire room (esp. huge billboard) on every footstep
+    sub('players', (v) => { this.remotePlayers = v || {}; });
+    sub('monster', (v) => { this.remoteMonsters = v || {}; });
+    sub('vehicles', (v) => { this.remoteVehicles = v || {}; });
+    sub('game', (v) => { this.gameStatus = v || { gameOver: false, win: false }; });
+    sub('pickups', (v) => { this.remotePickups = v || {}; });
+    sub('mission', (v) => { this.remoteMission = v || null; });
+    sub('missionActs', (v) => { this.remoteMissionActs = v || {}; });
+    sub('pick', (v) => { this.remotePick = v || null; });
+    sub('pickChoice', (v) => { this.remotePickChoice = v || {}; });
+    sub('pickAct', (v) => { this.remotePickAct = v || {}; });
+    sub('pickupClaims', (v) => { this.remoteClaims = v || {}; });
+    sub('revives', (v) => { this.remoteRevives = v || {}; });
+    sub('soundEvents', (v) => {
+      this.remoteSounds = v
+        ? Object.values(v).flatMap((s) => (s.list || []).map((e) => ({ ...e, by: s.by, t: e.id })))
         : [];
-      this.gameStatus = v.game || { gameOver: false, win: false };
-      this.remoteVehicles = v.vehicles || {};
-      this.remotePickups = v.pickups || {};
-      this.remoteMission = v.mission || null;
-      this.remoteMissionActs = v.missionActs || {};
-      this.remotePick = v.pick || null;
-      this.remoteRevives = v.revives || {};
-      this.remotePickChoice = v.pickChoice || {};
-      this.remotePickAct = v.pickAct || {};
-      this.remoteClaims = v.pickupClaims || {};
-      this.remoteBillboard = v.billboard || null;
-      this.meta = v.meta || { hostUid: null, started: false };
-
+    });
+    // Billboard once + rare updates (can be huge base64)
+    {
+      const unsub = onValue(ref(this.db, `${base}/billboard`), (snap) => {
+        this.remoteBillboard = snap.val() || null;
+        bump();
+      });
+      this.unsubs.push(() => unsub());
+    }
+    sub('meta', (v) => {
+      this.meta = v || { hostUid: null, started: false };
       if (this.meta.hostUid === this.uid) this.isHost = true;
       else if (this.meta.hostUid) this.isHost = false;
-
       if (!this.meta.hostUid) {
         const order = Object.entries(this.remotePlayers)
           .sort((a, b) => (a[1].joinedAt || 0) - (b[1].joinedAt || 0))
@@ -266,10 +263,7 @@ export class MultiplayerRoom {
       } else {
         clearTimeout(this._claimT);
       }
-
-      if (typeof this.onUpdate === 'function') this.onUpdate();
     });
-    this.unsubs.push(() => unsub());
     this._chatFrom = this.serverNow() - 15000;
     try {
       const cu = onChildAdded(
@@ -284,6 +278,10 @@ export class MultiplayerRoom {
   }
 
   /** Client-owned fields only; host also writes own health/alive. Uses update() so host damage is not clobbered. */
+  resetDoors() {
+    if (!this.isHost) return Promise.resolve();
+    return Promise.allSettled(['doors', 'doorsBroken'].map((k) => set(ref(this.db, `rooms/${this.code}/${k}`), null)));
+  }
   resetGame() {
     if (!this.isHost) return Promise.resolve();
     return update(ref(this.db, `rooms/${this.code}/game`), { gameOver: false, win: false, deaths: 0 });
@@ -380,6 +378,29 @@ export class MultiplayerRoom {
   }
 
   writePlayer(player) {
+    try {
+      const x = player.position?.x ?? player.x, z = player.position?.z ?? player.z;
+      const yaw = player.rotation?.yaw ?? player.yaw ?? 0;
+      const sig = [
+        Math.round((player.position?.y ?? player.y ?? 0) * 10),
+        player.moveState || '',
+        !!player.isHiding,
+        player.ridingVehicleId || '',
+        player.ridingRole || '',
+        !!player.flashlight,
+        !!player.isDowned,
+        player.alive !== false,
+        Math.round(player.health ?? 100),
+        Math.round((player.rotation?.pitch || 0) * 10),
+      ].join('|');
+      const moved = this._lx == null || sig !== this._sig
+        || Math.hypot(x - this._lx, z - this._lz) > 0.05
+        || Math.abs(yaw - (this._ly || 0)) > 0.03;
+      if (!moved && performance.now() - (this._ls || 0) < 1000) return Promise.resolve();
+      this._lx = x; this._lz = z; this._ly = yaw; this._sig = sig;
+      this._ls = performance.now();
+    } catch (e) { /* */ }
+
     const prev = this.remotePlayers[this.uid] || {};
     const eyeY = player.position.y;
     const footY = player.ridingVehicleId ? eyeY - 0.5
@@ -506,6 +527,9 @@ export class MultiplayerRoom {
   }
 
   /** Per-vehicle write: driver or host (host won't overwrite another driver's vehicle). */
+  removeVehicle(id) {
+    return remove(ref(this.db, `rooms/${this.code}/vehicles/${id}`));
+  }
   writeVehicle(v) {
     const me = this.uid;
     if (v.driverUid && v.driverUid !== me && !this.isHost) return Promise.resolve();
@@ -518,6 +542,7 @@ export class MultiplayerRoom {
       } catch (e) { /* */ }
     }
     return set(ref(this.db, `rooms/${this.code}/vehicles/${v.id}`), {
+      fuel: +(v.fuel ?? 0).toFixed(1), temp: +(v.temp ?? 30).toFixed(1), rpm: Math.round(v.rpm || 0), gear: v.gear || 1,
       type: v.type,
       x: v.position.x,
       y: v.position.y || 0,

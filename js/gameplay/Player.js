@@ -55,9 +55,11 @@ export class PlayerController {
       }
       if (e.code === binds.hide) this.toggleHide();
       if (e.code === binds.lighter) this.toggleLighter();
-      if (e.code === 'Digit1') this.consume('water');
-      if (e.code === 'Digit2') this.consume('food');
-      if (e.code === 'Digit3') this.consume('fuel');
+      if (!this.state._kiosk) {
+        if (e.code === 'Digit1') this.consume('water');
+        if (e.code === 'Digit2') this.consume('food');
+        if (e.code === 'Digit3') this.consume('fuel');
+      }
       if (e.code === binds.throw) this.throwDistraction();
     }, opt);
 
@@ -320,7 +322,7 @@ export class PlayerController {
     let speed = WALK;
     if (p.isCrouching) speed = CROUCH;
     else if (p.isRunning) speed = RUN;
-    speed *= (p._weatherSpeed ?? 1) * (p._speedMul ?? 1);
+    speed *= (p._weatherSpeed ?? 1) * (p._speedMul ?? 1) * (p._disasterSpeed ?? 1);
     if ((p.thirst ?? 100) <= 0) speed *= 0.85;
     try {
       const load = invWeight(this.state.data.inventory) / MAX_WEIGHT;

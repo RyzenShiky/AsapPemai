@@ -8,7 +8,7 @@ import { MONSTER_TYPES, ROSTER } from '../core/MonsterTypes.js';
 import { VEHICLE_FACE } from '../gameplay/Vehicle.js';
 import { BUILDING_DEFS, nearBuilding, BILLBOARD, TV_HOUSES, DOOR_W, DOOR_H, DOORS, setDoor, camsFor } from '../core/Buildings.js';
 import { recommendGraphics } from '../core/Device.js';
-import { groundHeight } from '../core/Collision.js';
+import { groundHeight, resolveCollisions } from '../core/Collision.js';
 import { itemMeshFor } from './ItemModels.js';
 
 export class Renderer {
@@ -1059,14 +1059,14 @@ export class Renderer {
       } else wall(wallT, h, d + wallT, hx, h / 2, 0, 'e');
 
       {
-        const rm = new THREE.Mesh(
-          def.type === 'house'
-            ? new THREE.ConeGeometry(Math.max(w, d) * 0.72, h * 0.45, 4)
-            : new THREE.BoxGeometry(w + 0.4, 0.25, d + 0.4),
-          def.type === 'house' ? roofHouse : roofBld
-        );
-        if (def.type === 'house') { rm.rotation.y = Math.PI / 4; rm.position.set(ox, h + h * 0.2, oz); }
-        else rm.position.set(ox, h + 0.1, oz);
+        let geo;
+        if (def.type === 'house') {
+          geo = new THREE.ConeGeometry(Math.SQRT1_2, h * 0.45, 4);
+          geo.rotateY(Math.PI / 4);
+          geo.scale(w + 0.6, 1, d + 0.6);
+        } else geo = new THREE.BoxGeometry(w + 0.4, 0.25, d + 0.4);
+        const rm = new THREE.Mesh(geo, def.type === 'house' ? roofHouse : roofBld);
+        rm.position.set(ox, def.type === 'house' ? h + h * 0.2 : h + 0.1, oz);
         rm.userData.home = rm.position.clone();
         this.buildingGroup.add(rm); this.roofMeshes[def.id] = rm;
       }
@@ -1106,7 +1106,7 @@ export class Renderer {
       );
       pivot.add(leaf);
       this.buildingGroup.add(pivot);
-      this.doors[def.id || (`b_${def.x}_${def.z}`)] = { pivot, closed: H[2], open: false };
+      this.doors[def.id || (`b_${def.x}_${def.z}`)] = {  pivot, closed: H[2], open: false , home: pivot.position.clone() };
     }
     for (const { mat, geos } of buckets.values()) {
       if (!geos.length) continue;
@@ -1548,6 +1548,15 @@ export class Renderer {
     }
   }
   resetWalls() {
+    for (const d of Object.values(this.doors || {})) {
+      d.broken = false; d.open = false; d.fly = null; d.fx = null;
+      if (d.pivot) {
+        d.pivot.visible = true;
+        d.pivot.rotation.set(0, d.closed || 0, 0);
+        if (d.home) d.pivot.position.copy(d.home);
+      }
+    }
+
     for (const m of [...Object.values(this.wallMeshes || {}), ...Object.values(this.roofMeshes || {})]) {
       m.visible = true; m.userData.fall = null; m.rotation.set(0, 0, 0);
       if (m.userData.home) m.position.copy(m.userData.home);
@@ -1954,7 +1963,7 @@ export class Renderer {
       const spd = Math.min(1, Math.abs(veh?.speed || 0) / (big ? 18 : 13));
       const vyaw = veh?.rotation?.yaw || 0;
       if (!vc.init || vc.id !== rid) {
-        vc.init = true; vc.id = rid; vc.lag = 0; vc.pyaw = vyaw;
+        vc.init = true; vc.id = rid; vc.lag = 0; vc.pyaw = vyaw; vc.t = null;
         vc.x = vm.position.x; vc.y = vm.position.y; vc.z = vm.position.z;
       }
       if (state.player.ridingRole === 'driver') {
@@ -1971,23 +1980,38 @@ export class Renderer {
       const back = (big ? 6.2 : 4.4) + spd * 1.2, up = (big ? 2.6 : 2.0) + spd * 0.2;
       let cx = vc.x + Math.sin(camYaw) * back, cz = vc.z + Math.cos(camYaw) * back;
       let cy = Math.max(vc.y + up, groundHeight(cx, cz) + 1.2);
+      let tHit = 1;
+      if (this.camColliders) {
+        const q = (this._cq ||= { x: 0, z: 0 });
+        for (let s = 0.3; s <= 1.001; s += 0.14) {
+          q.x = vc.x + (cx - vc.x) * s; q.z = vc.z + (cz - vc.z) * s;
+          const ox = q.x, oz = q.z;
+          resolveCollisions(q, 0.45, this.camColliders);
+          if (Math.abs(q.x - ox) + Math.abs(q.z - oz) > 0.01) { tHit = Math.max(0.3, s - 0.14); break; }
+        }
+      }
+      vc.t = vc.t == null ? tHit : vc.t + (tHit - vc.t) * (1 - Math.exp(-(tHit < vc.t ? 25 : 3) * dtv));
+      cx = vc.x + (cx - vc.x) * vc.t; cz = vc.z + (cz - vc.z) * vc.t;
+      cy = Math.max(vc.y + 1.0 + (cy - vc.y - 1.0) * vc.t, groundHeight(cx, cz) + 1.2);
       const sh = veh?.crashShake || 0;
       if (sh > 0) { cx += (Math.random() - 0.5) * sh * 0.25; cy += (Math.random() - 0.5) * sh * 0.25; cz += (Math.random() - 0.5) * sh * 0.25; }
       this.camera.position.set(cx, cy, cz);
       const lookDown = Math.atan2(up - 1.0, back) * 0.7;
       camPitch = Math.max(-0.9, Math.min(0.5, camPitch - lookDown));
-      vc.fov += (spd * 9 - vc.fov) * (1 - Math.exp(-4 * dtv));
-      this.camera.fov += vc.fov - vc.fovApplied;
-      vc.fovApplied = vc.fov;
-      this.camera.updateProjectionMatrix();
-    } else {
-      vc.init = false;
-      if (vc.fovApplied) {
-        let nf = vc.fovApplied * Math.exp(-6 * (this._dt || 0.016));
-        if (Math.abs(nf) < 0.05) nf = 0;
-        this.camera.fov -= vc.fovApplied - nf;
-        vc.fovApplied = nf; vc.fov = nf;
+      vc.fov += (spd * 6 - vc.fov) * (1 - Math.exp(-4 * dtv));
+      if (!this._js) {
+        this.camera.fov = (this._baseFov ??= 70) + vc.fov;
         this.camera.updateProjectionMatrix();
+      }
+    } else {
+      vc.init = false; vc.t = null;
+      if (vc.fov) {
+        vc.fov *= Math.exp(-6 * (this._dt || 0.016));
+        if (Math.abs(vc.fov) < 0.05) vc.fov = 0;
+        if (!this._js) {
+          this.camera.fov = (this._baseFov ??= 70) + vc.fov;
+          this.camera.updateProjectionMatrix();
+        }
       }
     }
     this.camera.rotation.y = camYaw;
@@ -2045,7 +2069,17 @@ export class Renderer {
 
     this._updateRain(dt || 0, this.camera.position);
     this._tickVideo(dt || 0);
+    const sh = this._shake || 0, dip = this._dip || 0;
+    let sx = 0, sy = 0, sz = 0;
+    if (sh > 0.002 || dip) {
+      const t = performance.now() * 0.001;
+      sx = (Math.sin(t * 47) + Math.sin(t * 83) * 0.6) * 0.05 * sh;
+      sy = (Math.sin(t * 61) + Math.sin(t * 97) * 0.5) * 0.045 * sh - dip;
+      sz = Math.sin(t * 37) * 0.02 * sh;
+      this.camera.position.x += sx; this.camera.position.y += sy; this.camera.rotation.z += sz;
+    }
     this.renderer.render(this.scene, this.camera);
+    if (sx || sy || sz) { this.camera.position.x -= sx; this.camera.position.y -= sy; this.camera.rotation.z -= sz; }
     this._adaptRes();
   }
 }

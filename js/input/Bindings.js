@@ -8,6 +8,7 @@ const DEFAULTS = {
   flash: 'KeyF',
   hide: 'KeyH',
   throw: 'KeyQ',
+  refuel: 'KeyR',
   interact: 'KeyE',
   lighter: 'KeyG',
 };

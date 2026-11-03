@@ -77,7 +77,7 @@ window.addEventListener('error', function (e) {
         <h1 class="flicker-title" data-text="LONGWAY">LONGWAY</h1>
         <p class="subtitle">Masuk untuk melanjutkan</p>
         <label>Nama tampilan
-          <input type="text" id="profile-name" maxlength="16" placeholder="Your name" />
+          <input type="text" id="profile-name" maxlength="16" placeholder="Nama kamu" />
         </label>
         <p class="subtitle" style="margin:0.5rem 0 0">Warna karakter <span style="opacity:.6">(terlihat oleh pemain lain di Multiplayer)</span></p>
         <div class="color-row" id="color-row">
@@ -101,9 +101,12 @@ window.addEventListener('error', function (e) {
           <summary>Kredit model 3D</summary>
           <p>
             <a href="https://sketchfab.com/3d-models/horror-skunx-retexterd-siren-head-updated-bf94583b404349d8bfcd12010ef3522e" target="_blank" rel="noopener">Siren Head</a>
-            — Horror BigGameRR (CC BY 4.0) ·
+            — Horror BigGameRR (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>) ·
             <a href="https://sketchfab.com/3d-models/the-boiled-one-horror-game-boiled-one-64ce66c413fe4e5e92a48e8e02a83590" target="_blank" rel="noopener">Boiled One</a>
-            — MG Rips (CC BY-NC 4.0). Proyek non-komersial.
+            — MG Rips (CC BY-NC 4.0).<br>
+            "Smily horror monster" by <a href="https://sketchfab.com/gostbento" target="_blank" rel="noopener">Bento</a>
+            (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>).
+            Proyek non-komersial; model dimodifikasi (kompresi/skala bila diterapkan).
           </p>
         </details>
         <p id="menu-player-name" class="subtitle"></p>
@@ -113,6 +116,7 @@ window.addEventListener('error', function (e) {
             <option value="mission">Misi</option>
             <option value="endless">Tanpa akhir</option>
             <option value="days">Batas hari</option>
+            <option value="disaster">Bencana Acak</option>
             <option value="shawarma">Shawarma Kiosk (Anomali) — BETA solo</option>
           </select>
           <p id="shawarma-beta-note" class="subtitle" style="display:none;max-width:22rem;margin:.4rem auto 0;font-size:.8rem;opacity:.85;line-height:1.35">
@@ -140,30 +144,30 @@ window.addEventListener('error', function (e) {
         <label class="mode-label" id="chapter-wrap">Episode (mode Cerita)
           <select id="chapter-select"></select>
         </label>
-        <button id="btn-start" class="btn primary">Start Game</button>
-        <button id="btn-continue" class="btn" disabled>Continue</button>
+        <button id="btn-start" class="btn primary">Mulai permainan</button>
+        <button id="btn-continue" class="btn" disabled>Lanjutkan</button>
         <button id="btn-multi" class="btn">Multiplayer</button>
-        <button id="btn-profile" class="btn">Profile</button>
+        <button id="btn-profile" class="btn">Profil</button>
         <button id="btn-settings" class="btn">Pengaturan</button>
       </div>
 
       <div id="multi-screen" class="screen hidden">
         <h2>Multiplayer</h2>
         <p class="subtitle">Host runs monster AI. Others listen &amp; render.</p>
-        <button id="btn-host" class="btn primary">Host Room</button>
+        <button id="btn-host" class="btn primary">Buat room</button>
         <label>Join code
           <input id="join-code" type="text" maxlength="8" placeholder="ABC123"
             style="text-transform:uppercase;padding:0.5rem;width:min(80vw,200px);background:#111;border:1px solid #444;color:#eee" />
         </label>
-        <button id="btn-join" class="btn">Join Room</button>
+        <button id="btn-join" class="btn">Gabung room</button>
         <button id="btn-multi-back" class="btn">Kembali</button>
       </div>
 
       <div id="lobby-screen" class="screen hidden">
-        <h2>Lobby</h2>
+        <h2>Lobi</h2>
         <p class="subtitle">Room code</p>
         <p id="lobby-code" style="font-size:2.5rem;letter-spacing:0.35em;color:var(--color-accent);font-family:var(--font-title)">------</p>
-        <button id="btn-copy-code" class="btn" type="button">Copy code</button>
+        <button id="btn-copy-code" class="btn" type="button">Salin kode</button>
         <p class="subtitle" style="margin-top:1rem">Players</p>
         <ul id="lobby-players" style="list-style:none;text-align:left;min-width:240px;max-height:200px;overflow:auto"></ul>
         <p id="lobby-status" class="subtitle">Waiting for host to start…</p>
@@ -174,8 +178,8 @@ window.addEventListener('error', function (e) {
             <option value="pickone">Pick One (1 jadi monster, min. 3 pemain)</option>
           </select>
         </label>
-        <button id="btn-start-multi" class="btn primary hidden">Start Game</button>
-        <button id="btn-lobby-leave" class="btn">Leave</button>
+        <button id="btn-start-multi" class="btn primary hidden">Mulai permainan</button>
+        <button id="btn-lobby-leave" class="btn">Keluar</button>
       </div>
 
       <div id="grain-overlay" aria-hidden="true"></div>
@@ -206,6 +210,13 @@ window.addEventListener('error', function (e) {
         <div id="monster-dist"></div>
         <div id="hud-info">
           <div id="match-timer">Hari 1</div>
+        <div id="veh-hud" class="hidden">
+  <div class="vh-speed"><b id="vh-kmh">0</b><small>km/j</small> <span id="vh-gear">N</span></div>
+  <div class="vh-row"><div class="v-track"><div id="vh-rpm-fill"></div></div><span id="vh-rpm-txt">0</span><small>rpm</small></div>
+  <div class="vh-row">⛽<div class="v-track"><div id="vh-fuel-fill"></div></div><span id="vh-fuel-txt"></span></div>
+  <div class="vh-row">🌡<div class="v-track"><div id="vh-temp-fill"></div></div><span id="vh-temp-txt"></span></div>
+  <p id="vh-warn" class="hidden"></p>
+</div>
           <div id="phase-label">SORE</div>
           <div id="weather-label"></div>
         </div>
@@ -241,6 +252,7 @@ window.addEventListener('error', function (e) {
         </label>
         <label>Look Sensitivity <input type="range" id="look-sens" min="0.0005" max="0.008" step="0.0001" value="0.0022" /></label>
         <label><input type="checkbox" id="invert-y" /> Balik sumbu Y</label>
+        <label class="chk"><input type="checkbox" id="reduce-motion" /> Kurangi kilatan / guncangan</label>
         <div id="touch-guide" class="hidden">
           <p class="subtitle"><b>Kontrol layar sentuh</b></p>
           <ul class="touch-guide-list">
@@ -269,7 +281,7 @@ window.addEventListener('error', function (e) {
           <div data-action="interact"><span>Interaksi</span><button class="btn-bind" type="button">—</button></div>
         </div>
         <button id="btn-ui-layout" class="btn" type="button">Atur Tata Letak UI</button>
-        <button id="btn-reset-binds" class="btn" type="button">Reset Keys</button>
+        <button id="btn-reset-binds" class="btn" type="button">Reset tombol</button>
         <button id="btn-settings-rotate" class="btn" type="button">Putar layar 90°</button>
         <button id="btn-settings-back" class="btn">Kembali</button>
       </div>
@@ -283,20 +295,20 @@ window.addEventListener('error', function (e) {
         <h1 id="go-title">KAMU MATI</h1>
         <p id="go-sub" class="subtitle"></p>
         <button id="btn-next-ep" class="btn primary hidden" type="button">Lanjut</button>
-        <button id="btn-restart" class="btn primary">Try Again</button>
-        <button id="btn-menu" class="btn">Main Menu</button>
+        <button id="btn-restart" class="btn primary">Coba lagi</button>
+        <button id="btn-menu" class="btn">Menu utama</button>
       </div>
     </div>
   </div>
   <div id="billboard-panel" class="bb-panel" aria-hidden="true">
     <h3>Billboard</h3>
-    <p class="subtitle">Upload foto / gambar atau video MP4 (host saja) (host preferred)</p>
+    <p class="subtitle">Unggah foto/gambar (host). Video butuh Storage berbayar — lewati saja.</p>
     <input type="file" id="bb-file" accept="image/*,video/mp4" />
-    <button id="bb-upload" class="btn primary" type="button">Upload</button>
-    <button id="bb-close" class="btn" type="button">Close</button>
+    <button id="bb-upload" class="btn primary" type="button">Unggah</button>
+    <button id="bb-close" class="btn" type="button">Tutup</button>
     <p id="bb-status" class="subtitle"></p>
   </div>
-  <script type="module" src="./js/main.js?v=8.6.3"></script>
+  <script type="module" src="./js/main.js?v=8.9.1"></script>
 <div id="toast" class="hidden" style="position:fixed;bottom:12%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#eee;padding:.6rem 1.2rem;border-radius:6px;z-index:10000;font-size:.9rem;max-width:90%;text-align:center"></div>
 
   <div id="pause-overlay" class="screen hidden" style="z-index:55;background:rgba(0,0,0,.72)">

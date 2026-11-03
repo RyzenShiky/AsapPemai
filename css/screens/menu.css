@@ -75,8 +75,8 @@
 /* Menu scroll + safe area (v8.6.3) */
 #app {
   width: 100vw;
-  height: 100dvh;
   height: 100vh; /* fallback */
+  height: 100dvh;
 }
 .screen {
   overflow-y: auto;
@@ -86,7 +86,7 @@
   padding: max(1.5rem, env(safe-area-inset-top)) 1rem max(1.5rem, env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
-.screen > :first-child { margin-top: auto; }
+.screen > .fog-layer + * { margin-top: auto; }
 .screen > :last-child { margin-bottom: auto; }
 
 #login-screen,
@@ -123,6 +123,14 @@
 .btn {
   white-space: nowrap;
   min-height: var(--tap, 44px);
+}
+.color-row {
+  width: min(100%, 22rem);
+  margin: 0.5rem auto;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 .color-swatches {
   display: flex;
@@ -201,4 +209,19 @@
   .flicker-title, #grain-overlay, .fog-layer, #app.screen-shake {
     animation: none !important;
   }
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
 }
